@@ -183,46 +183,6 @@ trainer.train(epochs=10000)
 E_field, H_field = network.predict(coordinates)
 ```
 
----
-
-## 📊 Results & Validation
-
-### 🎯 **Accuracy Benchmarks**
-- **Field prediction error**: < 1% vs analytical solutions
-- **Dispersion relation accuracy**: < 0.5% deviation from theory
-- **Boundary condition satisfaction**: Residuals < 10⁻⁶
-
-### ⚡ **Performance Metrics**
-- **Training time**: ~2 hours on single GPU (RTX 4090)
-- **Inference speed**: ~1ms per field evaluation
-- **Memory efficiency**: 50× reduction vs traditional FEM
-
-### 📈 **Validation Against Theory**
-Our implementation rigorously validates against:
-- ✅ **Analytical SPP dispersion relations**
-- ✅ **Known field distributions** for simple geometries  
-- ✅ **Energy conservation** (Poynting vector analysis)
-- ✅ **Reciprocity theorem** compliance
-
----
-
-## 🔬 Scientific Impact
-
-### Novel Contributions
-1. **First PINN implementation** for anisotropic metamaterial SPPs
-2. **Adaptive boundary condition enforcement** for complex interfaces
-3. **Multi-physics coupling** of electromagnetic and material response
-4. **Inverse design framework** for automated metamaterial optimization
-
-### Applications
-- 🔬 **Biosensing**: Enhanced sensitivity through field localization
-- 🌐 **Telecommunications**: Subwavelength waveguides and antennas
-- ⚡ **Solar cells**: Light trapping and absorption enhancement  
-- 🔍 **Microscopy**: Super-resolution imaging techniques
-- 🎯 **Quantum optics**: Single-photon sources and detectors
-
----
-
 ## 🛠️ Technical Details
 
 ### Automatic Differentiation
@@ -250,37 +210,6 @@ Carefully balanced multi-term loss ensures physical consistency:
 L = λ₁‖∇×E + iωμ₀H‖² + λ₂‖∇×H - iωε₀εᵣE‖² + 
     λ₃‖boundary_conditions‖² + λ₄‖training_data‖²
 ```
-
----
-
-## 📚 Citation
-
-If you use this work in your research, please cite:
-
-```bibtex
-@article{your_spp_pinn_2024,
-  title={Physics-Informed Neural Networks for Surface Plasmon Polaritons on Metamaterial Interfaces},
-  author={Your Name},
-  journal={Journal of Computational Physics},
-  year={2024},
-  doi={10.1000/182}
-}
-```
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Areas of particular interest:
-- 🧠 **Novel network architectures** for improved convergence
-- 🔬 **Additional physics models** (nonlinearity, dispersion)
-- 📊 **Benchmark datasets** for validation
-- 🎨 **Visualisation enhancements**
-- ⚡ **Performance optimizations**
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
-
----
 
 ## 📄 License
 
