@@ -298,10 +298,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Contact
 
-**Author**: Your Name  
-**Email**: your.email@university.ac.uk  
-**Institution**: Department of Physics, Your University  
-**ORCID**: [0000-0000-0000-0000](https://orcid.org/)
+**Author**: Dr Robert Michael Jones
+**Email**: robert.m.jones@kcl.ac.uk  
+**Institution**: Department of Physics, King's College London 
+**ORCID**: [0000-0002-5422-3088](https://orcid.org/0000-0002-5422-3088)
 
 ---
 
@@ -310,7 +310,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **⭐ Star this repository if you find it useful! ⭐**
 
 *Advancing the frontiers of computational electromagnetics through AI*
-
-![Electromagnetic Field Visualization](https://via.placeholder.com/800x400/1e1e1e/00ff00?text=SPP+Field+Distribution)
 
 </div>
