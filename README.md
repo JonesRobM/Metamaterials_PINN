@@ -3,8 +3,6 @@
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![arXiv](https://img.shields.io/badge/arXiv-2024.XXXX-b31b1b.svg)](https://arxiv.org/)
-[![DOI](https://img.shields.io/badge/DOI-10.1000%2F182-blue)](https://doi.org/)
 
 *Revolutionising electromagnetic metamaterial design through AI-driven physics simulation*
 
@@ -219,8 +217,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- **Funding**: EPSRC Grant EP/X000000/1
-- **Compute**: UK National Supercomputing Service (ARCHER2)
+- **Funding**: URF\R1\231460
 - **Inspiration**: The metamaterials and machine learning communities
 
 ---
