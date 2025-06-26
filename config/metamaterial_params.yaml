@@ -1,0 +1,398 @@
+# ============================================================================
+# Metamaterial Parameters Configuration
+# ============================================================================
+#
+# This file defines the electromagnetic properties of metamaterials and
+# dielectric media for SPP modelling. Parameters are based on realistic
+# values for plasmonic metamaterials operating in the near-infrared range.
+#
+# Complex permittivity format: "real+imagj" (e.g., "-5.0+0.2j")
+# All materials assumed to be non-magnetic (μᵣ = 1)
+# ============================================================================
+
+# Primary metamaterial configuration
+metamaterial:
+  # Material identification
+  name: "Hyperbolic_Metamaterial_Type_II"
+  description: "Uniaxial hyperbolic metamaterial with metallic response"
+  reference: "Nature Photonics 6, 259 (2012)"
+  
+  # Optical axis configuration  
+  optical_axis: "z"                   # Primary anisotropy direction: x, y, or z
+  crystal_class: "uniaxial"           # uniaxial, biaxial, isotropic
+  
+  # Complex permittivity tensor components
+  permittivity:
+    # Parallel to optical axis (extraordinary ray)
+    parallel: "-5.0+0.2j"            # ε∥ - Strong plasmonic response
+    
+    # Perpendicular to optical axis (ordinary ray)  
+    perpendicular: "-5.0+0.2j"       # ε⊥ - Same for isotropic case
+    
+    # For biaxial materials (optional)
+    x_component: "-5.0+0.2j"         # εₓₓ
+    y_component: "-5.0+0.2j"         # εᵧᵧ  
+    z_component: "-5.0+0.2j"         # ε_zz
+  
+  # Material properties
+  properties:
+    # Frequency dependence
+    plasma_frequency: 2.2e16          # ωₚ (rad/s) - characteristic frequency
+    collision_frequency: 1.0e14       # γ (rad/s) - damping rate
+    
+    # Physical structure
+    fill_fraction: 0.5                # Metal fill fraction (0-1)
+    periodicity: 50.0e-9             # Subwavelength period (m)
+    thickness: 100.0e-9              # Total thickness (m)
+    
+    # Quality factors
+    quality_factor: 25.0              # Q = ωₚ/γ
+    figure_of_merit: 12.5            # FOM = |Re(ε)|/Im(ε)
+
+# Dielectric superstrate/substrate
+dielectric:
+  # Standard dielectric properties
+  superstrate:
+    name: "Air"
+    permittivity: "1.0+0.0j"          # Air/vacuum
+    permeability: "1.0+0.0j"          # Non-magnetic
+    refractive_index: "1.0+0.0j"      # n = √(εμ)
+    thickness: 1.0e-6                 # Semi-infinite (large value)
+  
+  substrate:  
+    name: "SiO2"                      # Silica substrate
+    permittivity: "2.25+0.0j"        # Typical silica at NIR
+    permeability: "1.0+0.0j"          # Non-magnetic
+    refractive_index: "1.5+0.0j"      # n ≈ 1.5
+    thickness: 1.0e-6                 # Semi-infinite (large value)
+
+# Alternative metamaterial configurations
+metamaterial_library:
+  # Strongly anisotropic hyperbolic metamaterial
+  hyperbolic_strong:
+    name: "Strong_Hyperbolic_MM"
+    optical_axis: "z"
+    permittivity:
+      parallel: "-10.0+0.5j"         # Strong negative response
+      perpendicular: "8.0+0.1j"      # Positive perpendicular
+    applications: ["subwavelength_imaging", "negative_refraction"]
+  
+  # Plasmonic metamaterial (silver-like)
+  plasmonic_silver:
+    name: "Silver_Metamaterial"  
+    optical_axis: "z"
+    permittivity:
+      parallel: "-16.0+0.4j"         # Silver-like at 800 nm
+      perpendicular: "-16.0+0.4j"    # Isotropic silver response
+    applications: ["surface_plasmons", "field_enhancement"]
+  
+  # Epsilon-near-zero metamaterial
+  epsilon_near_zero:
+    name: "ENZ_Metamaterial"
+    optical_axis: "z"  
+    permittivity:
+      parallel: "0.1+0.05j"          # Near-zero parallel
+      perpendicular: "10.0+0.1j"     # Large perpendicular
+    applications: ["perfect_coupling", "tunneling"]
+  
+  # Gyroelectric metamaterial  
+  gyroelectric:
+    name: "Gyroelectric_MM"
+    optical_axis: "z"
+    permittivity:
+      parallel: "2.0+0.1j"
+      perpendicular: "2.0+0.1j"
+    gyrotropy: "0.5+0.02j"           # Off-diagonal tensor elements
+    applications: ["nonreciprocal_devices", "isolators"]
+
+# Frequency-dependent material models
+dispersion_models:
+  # Drude model for metals
+  drude:
+    enabled: true
+    plasma_frequency: 2.2e16          # ωₚ (rad/s)
+    collision_frequency: 1.0e14       # γ (rad/s)
+    background_permittivity: 1.0      # ε∞
+    
+    # Model equation: ε(ω) = ε∞ - ωₚ²/(ω² + iγω)
+    
+  # Lorentz oscillator model
+  lorentz:
+    enabled: false
+    oscillators:
+      - resonance_frequency: 3.0e15   # ω₀ (rad/s)
+        plasma_frequency: 1.0e15      # ωₚ (rad/s)
+        damping_frequency: 1.0e13     # γ (rad/s)
+        strength: 1.0                 # Oscillator strength
+        
+  # Debye relaxation model
+  debye:
+    enabled: false
+    static_permittivity: 10.0         # εₛ
+    optical_permittivity: 2.0         # ε∞  
+    relaxation_time: 1.0e-12         # τ (s)
+
+# Interface properties
+interface:
+  # Boundary conditions
+  boundary_type: "continuous"         # continuous, impedance, perfect_conductor
+  
+  # Surface roughness effects
+  roughness:
+    enabled: false                    # Include surface roughness
+    rms_height: 2.0e-9               # RMS roughness height (m)
+    correlation_length: 50.0e-9       # Lateral correlation length (m)
+    
+  # Nonlocal effects
+  nonlocal:
+    enabled: false                    # Include spatial dispersion
+    beta: 1.0e6                      # Nonlocal parameter (m⁻¹)
+    
+  # Surface plasmon properties (computed)
+  spp_properties:
+    # These will be computed from material parameters
+    propagation_length: null          # Will be calculated
+    penetration_depth_metal: null     # Will be calculated  
+    penetration_depth_dielectric: null # Will be calculated
+    field_enhancement: null           # Will be calculated
+
+# Validation and testing materials
+validation_materials:
+  # Perfect electric conductor (for testing)
+  pec:
+    name: "Perfect_Electric_Conductor"
+    permittivity: "-1e6+0j"          # Very large negative permittivity
+    boundary_condition: "perfect_conductor"
+    
+  # Perfect magnetic conductor (for testing)
+  pmc:  
+    name: "Perfect_Magnetic_Conductor"
+    permeability: "-1e6+0j"          # Very large negative permeability
+    boundary_condition: "perfect_magnetic_conductor"
+    
+  # Vacuum (reference)
+  vacuum:
+    name: "Vacuum"
+    permittivity: "1.0+0.0j"
+    permeability: "1.0+0.0j"
+    impedance: 376.730313             # Z₀ (Ω)
+
+# Experimental parameter ranges
+parameter_sweeps:
+  # For optimization and parameter studies
+  frequency_range:
+    min: 0.5e15                      # 500 THz
+    max: 2.0e15                      # 2 PHz  
+    steps: 100                       # Number of frequency points
+    
+  permittivity_real_range:
+    min: -20.0                       # Strong plasmonic
+    max: 20.0                        # High-index dielectric
+    steps: 50
+    
+  permittivity_imag_range:  
+    min: 0.01                        # Low loss
+    max: 2.0                         # High loss
+    steps: 30
+    
+  # Thickness variations
+  thickness_range:
+    min: 10.0e-9                     # 10 nm
+    max: 1000.0e-9                   # 1 μm
+    steps: 20
+
+# Physical validation criteria
+validation_criteria:
+  # SPP existence conditions
+  spp_conditions:
+    metal_condition: "Re(ε_metal) < 0"           # Metallic response required
+    dielectric_condition: "Re(ε_dielectric) > 0" # Dielectric response required
+    binding_condition: "Re(ε_metal + ε_dielectric) < 0" # Bound mode condition
+    
+  # Physical bounds
+  physical_bounds:
+    min_propagation_length: 1.0e-9              # Minimum L_spp (m)
+    max_propagation_length: 1.0e-3              # Maximum L_spp (m)
+    min_penetration_depth: 1.0e-9               # Minimum penetration (m)
+    max_penetration_depth: 1.0e-5               # Maximum penetration (m)
+    min_field_enhancement: 1.0                  # Minimum enhancement factor
+    max_field_enhancement: 1000.0               # Maximum enhancement factor
+    
+  # Energy conservation
+  energy_conservation:
+    tolerance: 1.0e-6                           # Energy conservation tolerance
+    check_poynting_vector: true                 # Verify Poynting vector
+    check_power_flow: true                      # Verify power conservation
+
+# Material database references
+material_database:
+  # Literature values for common materials
+  metals:
+    silver:
+      frequency_range: [1.0e15, 3.0e15]        # Valid frequency range (Hz)
+      permittivity_800nm: "-16.0+0.4j"         # At 800 nm wavelength
+      permittivity_1550nm: "-120.0+2.0j"       # At 1550 nm wavelength
+      reference: "Palik Handbook of Optical Constants"
+      
+    gold:
+      frequency_range: [1.0e15, 3.0e15]
+      permittivity_800nm: "-24.0+1.5j"         # At 800 nm wavelength
+      permittivity_1550nm: "-115.0+7.0j"       # At 1550 nm wavelength
+      reference: "Johnson and Christy (1972)"
+      
+    aluminum:
+      frequency_range: [1.0e15, 5.0e15]
+      permittivity_800nm: "-56.0+15.0j"        # At 800 nm wavelength
+      permittivity_400nm: "-8.0+1.5j"          # At 400 nm wavelength
+      reference: "Rakic et al. (1998)"
+  
+  dielectrics:
+    silica:
+      frequency_range: [1.0e14, 1.0e16]
+      permittivity: "2.25+0.0j"                # Nearly lossless
+      sellmeier_coefficients: [0.6961663, 0.4079426, 0.8974794]
+      reference: "Malitson (1965)"
+      
+    silicon:
+      frequency_range: [1.0e14, 3.0e15]
+      permittivity_1550nm: "12.0+0.0j"         # Transparent at telecom
+      permittivity_800nm: "14.0+0.1j"          # Slight absorption
+      reference: "Green (2008)"
+
+# Manufacturing constraints
+manufacturing:
+  # Fabrication limits
+  minimum_feature_size: 10.0e-9               # 10 nm minimum feature
+  aspect_ratio_limit: 20.0                    # Maximum height/width ratio
+  layer_thickness_tolerance: 2.0e-9           # ±2 nm thickness variation
+  
+  # Process-dependent parameters
+  fabrication_methods:
+    electron_beam_lithography:
+      resolution: 5.0e-9                      # 5 nm resolution
+      throughput: "low"                       # Processing speed
+      cost: "high"                           # Fabrication cost
+      
+    nanoimprint_lithography:
+      resolution: 10.0e-9                     # 10 nm resolution
+      throughput: "high"                      # Processing speed
+      cost: "medium"                         # Fabrication cost
+      
+    focused_ion_beam:
+      resolution: 10.0e-9                     # 10 nm resolution
+      throughput: "very_low"                  # Processing speed
+      cost: "very_high"                      # Fabrication cost
+
+# Temperature effects
+temperature_dependence:
+  # Thermal coefficients
+  reference_temperature: 300.0                # K (room temperature)
+  
+  thermal_coefficients:
+    permittivity_real: -1.0e-4                # dε'/dT (K⁻¹)
+    permittivity_imag: 1.0e-5                 # dε''/dT (K⁻¹)
+    thermal_expansion: 1.0e-5                 # Linear expansion (K⁻¹)
+    
+  # Operating temperature range
+  operating_range:
+    min_temperature: 77.0                     # K (liquid nitrogen)
+    max_temperature: 400.0                    # K (moderate heating)
+
+# Nonlinear effects (for advanced modelling)
+nonlinear_effects:
+  # Kerr nonlinearity
+  kerr_effect:
+    enabled: false                            # Include Kerr nonlinearity
+    n2: 1.0e-18                              # Nonlinear refractive index (m²/W)
+    
+  # Saturable absorption
+  saturable_absorption:
+    enabled: false                            # Include saturable absorption
+    saturation_intensity: 1.0e10             # Saturation intensity (W/m²)
+    
+  # Frequency mixing
+  frequency_mixing:
+    enabled: false                            # Include frequency conversion
+    chi2: 1.0e-12                            # Second-order susceptibility (m/V)
+    chi3: 1.0e-22                            # Third-order susceptibility (m²/V²)
+
+# Quantum effects (for future extensions)
+quantum_effects:
+  # Quantum size effects
+  quantum_size:
+    enabled: false                            # Include quantum confinement
+    characteristic_size: 5.0e-9              # Quantum confinement size (m)
+    
+  # Tunneling effects
+  tunneling:
+    enabled: false                            # Include quantum tunneling
+    barrier_height: 1.0                      # Tunnel barrier height (eV)
+    
+  # Landau damping
+  landau_damping:
+    enabled: false                            # Include Landau damping
+    damping_coefficient: 1.0e-3              # Damping strength
+
+# Advanced metamaterial concepts
+advanced_concepts:
+  # Time-varying materials
+  time_modulation:
+    enabled: false                            # Time-varying permittivity
+    modulation_frequency: 1.0e12             # Modulation frequency (Hz)
+    modulation_depth: 0.1                    # Relative modulation depth
+    
+  # Spatially dispersive materials
+  spatial_dispersion:
+    enabled: false                            # Include nonlocal effects
+    characteristic_length: 1.0e-8            # Nonlocal length scale (m)
+    
+  # Bianisotropic materials
+  bianisotropy:
+    enabled: false                            # Magnetoelectric coupling
+    coupling_strength: 0.1                   # Dimensionless coupling parameter
+
+# Quality assurance
+quality_assurance:
+  # Numerical checks
+  numerical_checks:
+    causality_check: true                     # Verify causality (Kramers-Kronig)
+    passivity_check: true                     # Verify energy dissipation
+    reciprocity_check: true                   # Check reciprocity relations
+    
+  # Physical consistency
+  physical_consistency:
+    energy_conservation: true                 # Energy must be conserved
+    momentum_conservation: true               # Momentum must be conserved
+    boundary_continuity: true                 # Fields continuous at interfaces
+    
+  # Convergence criteria
+  convergence:
+    field_tolerance: 1.0e-6                  # Field convergence tolerance
+    energy_tolerance: 1.0e-8                 # Energy convergence tolerance
+    max_iterations: 10000                     # Maximum solver iterations
+
+# Documentation and metadata
+metadata:
+  # Version control
+  version: "1.0.0"
+  last_updated: "2024-01-15"
+  created_by: "Your Name"
+  
+  # References and citations
+  key_references:
+    - "Poddubny et al., Nature Photonics 7, 948 (2013)"
+    - "Shekhar et al., Nano Convergence 1, 14 (2014)"
+    - "Guo et al., Journal of Applied Physics 127, 071101 (2020)"
+    
+  # Related projects
+  related_work:
+    - project: "Hyperbolic_MM_Simulation"
+      repository: "https://github.com/example/hyperbolic-mm"
+    - project: "SPP_Analytics"  
+      repository: "https://github.com/example/spp-analytics"
+      
+  # Data provenance
+  data_sources:
+    experimental: "University Lab Measurements 2023"
+    theoretical: "DFT Calculations using VASP"
+    literature: "Compiled from peer-reviewed publications"

@@ -1,0 +1,243 @@
+# ============================================================================
+# Base Configuration for SPP Metamaterial PINN
+# ============================================================================
+# 
+# This file contains the fundamental configuration parameters for training
+# Physics-Informed Neural Networks to model Surface Plasmon Polaritons on
+# metamaterial interfaces.
+#
+# Physical units:
+# - Length: metres (m)
+# - Time: seconds (s)  
+# - Frequency: Hz
+# - Electric field: V/m
+# - Magnetic field: A/m
+# ============================================================================
+
+# Project metadata
+project:
+  name: "SPP_Metamaterial_PINN"
+  version: "1.0.0"
+  description: "Physics-Informed Neural Networks for Surface Plasmon Polaritons"
+  author: "Your Name"
+  institution: "Your University"
+
+# Physics parameters
+physics:
+  frequency: 1.0e15                    # Operating frequency (Hz) - ~300 THz, λ ≈ 1 μm
+  wavelength: 1.0e-6                   # Free space wavelength (m)
+  angular_frequency: 6.283185e15       # ω = 2πf (rad/s)
+  
+  # Physical constants
+  constants:
+    speed_of_light: 299792458.0        # c (m/s)
+    vacuum_permittivity: 8.854187e-12  # ε₀ (F/m)
+    vacuum_permeability: 1.256637e-6   # μ₀ (H/m)
+    impedance_free_space: 376.730313   # Z₀ = √(μ₀/ε₀) (Ω)
+  
+  # Background medium properties
+  background:
+    permittivity: 1.0+0.0j             # Air/vacuum
+    permeability: 1.0+0.0j             # Non-magnetic
+    refractive_index: 1.0+0.0j
+
+# Computational domain
+domain:
+  # Spatial extent (metres)
+  x_range: [-2.0e-6, 2.0e-6]          # 4 μm total width
+  y_range: [-2.0e-6, 2.0e-6]          # 4 μm total depth  
+  z_range: [-1.0e-6, 1.0e-6]          # 2 μm total height
+  
+  # Interface location
+  interface_z: 0.0                     # Metamaterial-dielectric interface at z=0
+  
+  # Domain discretization for visualization
+  visualization:
+    nx: 100                            # Points in x-direction
+    ny: 100                            # Points in y-direction  
+    nz: 50                             # Points in z-direction
+
+# Neural network architecture
+network:
+  # Input/output dimensions
+  input_dim: 3                         # (x, y, z) coordinates
+  output_dim: 6                        # (Ex, Ey, Ez, Hx, Hy, Hz)
+  
+  # Hidden layer configuration
+  hidden_layers: [64, 64, 64, 64]      # Four hidden layers with 64 neurons each
+  activation: "tanh"                   # Activation function: tanh, relu, sin, swish
+  
+  # Advanced network options
+  fourier_features:
+    enabled: false                     # Use Fourier feature encoding
+    num_frequencies: 10                # Number of frequency components
+    scale: 1.0                        # Frequency scale factor
+  
+  # Initialization
+  initialization:
+    method: "xavier_normal"            # xavier_normal, xavier_uniform, kaiming_normal
+    gain: 1.0                         # Initialization gain factor
+
+# Training configuration
+training:
+  # Basic training parameters
+  epochs: 10000                        # Maximum training epochs
+  batch_size: 1024                    # Batch size for collocation points
+  learning_rate: 1.0e-3               # Initial learning rate
+  
+  # Optimizer settings
+  optimizer:
+    type: "adam"                      # adam, lbfgs, sgd
+    beta1: 0.9                        # Adam beta1 parameter
+    beta2: 0.999                      # Adam beta2 parameter
+    eps: 1.0e-8                       # Adam epsilon parameter
+    weight_decay: 0.0                 # L2 regularization strength
+  
+  # Learning rate scheduling
+  scheduler:
+    type: "step"                      # step, exponential, cosine, plateau
+    step_size: 2000                   # Steps between LR reductions
+    gamma: 0.9                        # LR reduction factor
+    patience: 500                     # Epochs to wait for plateau scheduler
+  
+  # Collocation point sampling
+  sampling:
+    # Interior domain points
+    n_collocation: 10000              # Interior physics points per epoch
+    n_boundary: 2000                  # Interface boundary points per epoch
+    n_initial: 0                      # Initial condition points (for time-dependent)
+    
+    # Adaptive sampling parameters
+    adaptive_sampling:
+      enabled: true                   # Enable adaptive point sampling
+      update_frequency: 1000          # Epochs between sampling updates
+      percentile_threshold: 90        # Percentile for high-residual regions
+      max_points: 20000              # Maximum total collocation points
+    
+    # Sampling weights by region
+    region_weights:
+      interface: 2.0                  # Higher weight near interface
+      metamaterial: 1.0               # Standard weight in metamaterial
+      dielectric: 1.0                 # Standard weight in dielectric
+
+# Loss function configuration  
+loss:
+  # Loss component weights
+  weights:
+    maxwell_curl_E: 1.0               # Faraday's law: ∇×E + iωμ₀H = 0
+    maxwell_curl_H: 1.0               # Ampère's law: ∇×H - iωε₀εᵣE = 0
+    maxwell_div_E: 0.1                # Gauss's law: ∇·(εᵣE) = 0
+    maxwell_div_H: 0.1                # No magnetic monopoles: ∇·H = 0
+    
+    boundary_tangential_E: 10.0       # Tangential E continuity
+    boundary_tangential_H: 10.0       # Tangential H continuity  
+    boundary_normal_D: 5.0            # Normal D continuity
+    boundary_normal_B: 5.0            # Normal B continuity
+    
+    data_fitting: 100.0               # Experimental/reference data
+    regularization: 0.01              # Network regularization
+  
+  # Loss scaling and normalization
+  normalization:
+    enabled: true                     # Enable loss component normalization
+    method: "adaptive"                # adaptive, fixed, none
+    update_frequency: 100             # Epochs between normalization updates
+
+# Validation and monitoring
+validation:
+  # Validation frequency
+  frequency: 100                      # Validate every N epochs
+  
+  # Metrics to compute
+  metrics:
+    - "field_mse"                     # Mean squared error in fields
+    - "maxwell_residual"              # Maxwell equation residuals
+    - "boundary_residual"             # Boundary condition residuals
+    - "energy_conservation"           # Poynting vector analysis
+    - "dispersion_accuracy"           # SPP dispersion relation accuracy
+  
+  # Analytical validation
+  analytical_tests:
+    enabled: true                     # Compare against analytical solutions
+    plane_wave_test: true            # Plane wave validation
+    spp_dispersion_test: true        # SPP dispersion validation
+
+# Checkpointing and logging
+checkpointing:
+  save_frequency: 1000                # Save checkpoint every N epochs
+  save_best: true                     # Save best model based on validation loss
+  checkpoint_dir: "./checkpoints"     # Directory for saved models
+  
+  # What to save
+  save_optimizer: true                # Save optimizer state
+  save_scheduler: true                # Save learning rate scheduler state
+  save_config: true                   # Save configuration with checkpoint
+
+# Logging configuration
+logging:
+  level: "INFO"                       # DEBUG, INFO, WARNING, ERROR
+  log_frequency: 100                  # Log every N epochs
+  log_file: "./logs/training.log"     # Log file location
+  
+  # TensorBoard/Weights & Biases integration
+  tensorboard:
+    enabled: true                     # Enable TensorBoard logging
+    log_dir: "./logs/tensorboard"     # TensorBoard log directory
+    
+  wandb:
+    enabled: false                    # Enable Weights & Biases logging
+    project: "spp-metamaterial-pinn"  # W&B project name
+    entity: null                      # W&B entity (username/team)
+
+# Hardware and performance
+hardware:
+  # Device configuration
+  device: "auto"                      # auto, cpu, cuda, cuda:0, etc.
+  mixed_precision: false              # Enable mixed precision training
+  
+  # Memory management
+  gradient_checkpointing: false       # Trade compute for memory
+  dataloader_workers: 4              # Number of data loading workers
+  
+  # Distributed training
+  distributed:
+    enabled: false                    # Enable distributed training
+    backend: "nccl"                   # nccl, gloo, mpi
+    world_size: 1                     # Number of processes
+
+# Visualization settings
+visualization:
+  # Field plotting
+  field_plots:
+    enabled: true                     # Generate field plots during training
+    frequency: 1000                   # Plot every N epochs
+    components: ["Ex", "Ey", "Hz"]    # Field components to plot
+    
+  # Plot styling
+  style:
+    colormap: "RdBu_r"               # Matplotlib colormap
+    figure_size: [12, 8]             # Figure size in inches
+    dpi: 150                         # Figure resolution
+    
+  # Animation settings  
+  animation:
+    enabled: false                    # Create training animations
+    fps: 10                          # Frames per second
+    duration: 30                     # Animation duration (seconds)
+
+# Reproducibility
+reproducibility:
+  seed: 42                           # Random seed for reproducibility
+  deterministic: false               # Enable deterministic algorithms (slower)
+  benchmark: true                    # Enable cudnn benchmarking (faster)
+
+# Experimental features
+experimental:
+  # Advanced PINN techniques
+  causal_training: false             # Causal training for time-dependent problems
+  adversarial_training: false        # Adversarial training for robustness
+  multi_scale_training: false        # Multi-scale training approach
+  
+  # Novel architectures
+  modified_mlp: false                # Modified MLP with skip connections
+  physics_guided_loss: false        # Physics-guided loss modifications
