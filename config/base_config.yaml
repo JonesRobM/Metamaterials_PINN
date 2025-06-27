@@ -19,14 +19,14 @@ project:
   name: "SPP_Metamaterial_PINN"
   version: "1.0.0"
   description: "Physics-Informed Neural Networks for Surface Plasmon Polaritons"
-  author: "Your Name"
-  institution: "Your University"
+  author: "Dr Robert Michael Jones"
+  institution: "King's College London"
 
 # Physics parameters
 physics:
-  frequency: 1.0e15                    # Operating frequency (Hz) - ~300 THz, λ ≈ 1 μm
-  wavelength: 1.0e-6                   # Free space wavelength (m)
-  angular_frequency: 6.283185e15       # ω = 2πf (rad/s)
+  frequency: 1000000000000000.0        # Operating frequency (Hz) - ~300 THz, λ ≈ 1 μm
+  wavelength: 0.000001                 # Free space wavelength (m)
+  angular_frequency: 6283185000000000.0 # ω = 2πf (rad/s)
   
   # Physical constants
   constants:
@@ -37,16 +37,16 @@ physics:
   
   # Background medium properties
   background:
-    permittivity: 1.0+0.0j             # Air/vacuum
-    permeability: 1.0+0.0j             # Non-magnetic
-    refractive_index: 1.0+0.0j
+    permittivity: "1.0+0.0j"          # Air/vacuum (keep as string for complex)
+    permeability: "1.0+0.0j"          # Non-magnetic
+    refractive_index: "1.0+0.0j"      # n = √(εμ)
 
 # Computational domain
 domain:
   # Spatial extent (metres)
-  x_range: [-2.0e-6, 2.0e-6]          # 4 μm total width
-  y_range: [-2.0e-6, 2.0e-6]          # 4 μm total depth  
-  z_range: [-1.0e-6, 1.0e-6]          # 2 μm total height
+  x_range: [-0.000002, 0.000002]      # 4 μm total width
+  y_range: [-0.000002, 0.000002]      # 4 μm total depth  
+  z_range: [-0.000001, 0.000001]      # 2 μm total height
   
   # Interface location
   interface_z: 0.0                     # Metamaterial-dielectric interface at z=0
@@ -83,14 +83,14 @@ training:
   # Basic training parameters
   epochs: 10000                        # Maximum training epochs
   batch_size: 1024                    # Batch size for collocation points
-  learning_rate: 1.0e-3               # Initial learning rate
+  learning_rate: 0.001                # Initial learning rate (changed from 1.0e-3)
   
   # Optimizer settings
   optimizer:
     type: "adam"                      # adam, lbfgs, sgd
     beta1: 0.9                        # Adam beta1 parameter
     beta2: 0.999                      # Adam beta2 parameter
-    eps: 1.0e-8                       # Adam epsilon parameter
+    eps: 0.00000001                   # Adam epsilon parameter
     weight_decay: 0.0                 # L2 regularization strength
   
   # Learning rate scheduling

@@ -148,6 +148,9 @@ class ConfigManager:
         # Convert complex numbers from strings
         config = self._process_complex_numbers(config)
         
+        # Convert scientific notation strings to numbers
+        config = self._process_numeric_values(config)
+        
         # Validate required sections
         required_sections = ['physics', 'training', 'domain', 'metamaterial']
         for section in required_sections:
@@ -156,14 +159,14 @@ class ConfigManager:
         
         # Validate physics parameters
         physics = config['physics']
-        if physics['frequency'] <= 0:
+        if float(physics['frequency']) <= 0:
             raise ValueError("Physics frequency must be positive")
         
         # Validate training parameters
         training = config['training']
-        if training['epochs'] <= 0:
+        if float(training['epochs']) <= 0:
             raise ValueError("Training epochs must be positive")
-        if training['lr'] <= 0:
+        if float(training['learning_rate']) <= 0:
             raise ValueError("Learning rate must be positive")
         
         # Set device
@@ -171,6 +174,39 @@ class ConfigManager:
             config['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         return config
+    
+    def _process_numeric_values(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process numeric strings in configuration (including scientific notation).
+        
+        Args:
+            config: Configuration dictionary
+            
+        Returns:
+            Configuration with processed numeric values
+        """
+        def convert_numeric(obj):
+            if isinstance(obj, dict):
+                return {k: convert_numeric(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numeric(item) for item in obj]
+            elif isinstance(obj, str):
+                # Try to convert scientific notation and regular numbers
+                try:
+                    # Check for complex numbers first
+                    if 'j' in obj or 'i' in obj:
+                        complex_str = obj.replace('i', 'j')
+                        return complex(complex_str)
+                    # Check for scientific notation or regular numbers
+                    elif 'e' in obj.lower() or obj.replace('.', '').replace('-', '').isdigit():
+                        return float(obj)
+                except (ValueError, TypeError):
+                    pass
+                return obj
+            else:
+                return obj
+        
+        return convert_numeric(config)
     
     def _process_complex_numbers(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -203,6 +239,40 @@ class ConfigManager:
                 return obj
         
         return convert_complex(config)
+    
+    def _process_numeric_values(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process numeric strings in configuration (including scientific notation).
+        
+        Args:
+            config: Configuration dictionary
+            
+        Returns:
+            Configuration with processed numeric values
+        """
+        def convert_numeric(obj):
+            if isinstance(obj, dict):
+                return {k: convert_numeric(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numeric(item) for item in obj]
+            elif isinstance(obj, str):
+                # Try to convert scientific notation and regular numbers
+                try:
+                    # Check for complex numbers first
+                    if 'j' in obj or 'i' in obj:
+                        complex_str = obj.replace('i', 'j')
+                        return complex(complex_str)
+                    # Check for scientific notation or regular numbers
+                    elif ('e' in obj.lower() or 
+                          obj.replace('.', '').replace('-', '').replace('+', '').replace('e', '').replace('E', '').isdigit()):
+                        return float(obj)
+                except (ValueError, TypeError):
+                    pass
+                return obj
+            else:
+                return obj
+        
+        return convert_numeric(config)
     
     def get(self, key: str, default: Any = None) -> Any:
         """

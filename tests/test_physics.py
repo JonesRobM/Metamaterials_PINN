@@ -296,6 +296,7 @@ class TestBoundaryConditions:
         assert combined_res.shape == (5, 16)  # 4 boundary conditions × 4 components avg
     
     def test_perfect_conductor_boundary(self, boundary_conditions):
+        
         """Test perfect conductor boundary condition."""
         # Tangential E field should be zero at PEC
         E_tangential = torch.tensor([[1, 1, 0], [0, 1, 1]], dtype=torch.complex64)
