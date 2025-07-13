@@ -15,8 +15,8 @@ class BoundaryConditions:
     Electromagnetic boundary conditions at metamaterial-dielectric interfaces.
     
     Implements:
-    1. Tangential E field continuity: n × (E₂ - E₁) = 0
-    2. Tangential H field continuity: n × (H₂ - H₁) = 0  
+    1. Tangential E field continuity: n x (E₂ - E₁) = 0
+    2. Tangential H field continuity: n x (H₂ - H₁) = 0  
     3. Normal D field continuity: n · (D₂ - D₁) = 0 (no surface charges)
     4. Normal B field continuity: n · (B₂ - B₁) = 0
     """
@@ -40,7 +40,7 @@ class BoundaryConditions:
     
     def cross_product(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         """
-        Compute cross product a × b for batch of vectors.
+        Compute cross product a x b for batch of vectors.
         
         Args:
             a: Vector of shape (N, 3) or (3,)
@@ -63,7 +63,7 @@ class BoundaryConditions:
     
     def tangential_E_continuity(self, E1: torch.Tensor, E2: torch.Tensor) -> torch.Tensor:
         """
-        Compute residual for tangential E field continuity: n × (E₂ - E₁) = 0
+        Compute residual for tangential E field continuity: n x (E₂ - E₁) = 0
         
         Args:
             E1: Electric field in medium 1, shape (N, 3)
@@ -86,7 +86,7 @@ class BoundaryConditions:
     
     def tangential_H_continuity(self, H1: torch.Tensor, H2: torch.Tensor) -> torch.Tensor:
         """
-        Compute residual for tangential H field continuity: n × (H₂ - H₁) = 0
+        Compute residual for tangential H field continuity: n x (H₂ - H₁) = 0
         
         Args:
             H1: Magnetic field in medium 1, shape (N, 3)
