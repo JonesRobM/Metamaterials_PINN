@@ -1,32 +1,47 @@
 """
-Physics-Informed Neural Networks (PINNs) Models Module
+Electromagnetic Physics-Informed Neural Networks (PINNs) Models Module
 
 This module provides neural network architectures and loss functions
-specifically designed for solving partial differential equations using
-physics-informed neural networks.
+specifically designed for solving Maxwell's equations in metamaterial
+systems, particularly for Surface Plasmon Polariton (SPP) modeling.
 """
 
-from .pinn_network import PINNNetwork, DeepONet
+from .pinn_network import (
+    ElectromagneticPINN,
+    ComplexPINN,
+    SPPNetwork,
+    MetamaterialDeepONet,
+    MultiFrequencyPINN
+)
 from .loss_functions import (
-    PDELoss,
-    BoundaryLoss,
-    InitialConditionLoss,
-    DataLoss,
-    CompositeLoss,
-    GradientPenalty,
-    CausalityLoss
+    MaxwellCurlLoss,
+    MaxwellDivergenceLoss,
+    MetamaterialConstitutiveLoss,
+    InterfaceBoundaryLoss,
+    SPPBoundaryLoss,
+    TangentialContinuityLoss,
+    PowerFlowLoss,
+    EM_CompositeLoss,
+    WaveguideLoss,
+    RadiationLoss
 )
 
 __all__ = [
-    'PINNNetwork',
-    'DeepONet', 
-    'PDELoss',
-    'BoundaryLoss',
-    'InitialConditionLoss',
-    'DataLoss',
-    'CompositeLoss',
-    'GradientPenalty',
-    'CausalityLoss'
+    'ElectromagneticPINN',
+    'ComplexPINN', 
+    'SPPNetwork',
+    'MetamaterialDeepONet',
+    'MultiFrequencyPINN',
+    'MaxwellCurlLoss',
+    'MaxwellDivergenceLoss',
+    'MetamaterialConstitutiveLoss',
+    'InterfaceBoundaryLoss',
+    'SPPBoundaryLoss',
+    'TangentialContinuityLoss',
+    'PowerFlowLoss',
+    'EM_CompositeLoss',
+    'WaveguideLoss',
+    'RadiationLoss'
 ]
 
 __version__ = '0.1.0'
