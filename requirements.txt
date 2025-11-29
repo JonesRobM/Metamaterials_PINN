@@ -1,9 +1,0 @@
-# Core dependencies for SPP metamaterial PINN physics module
-torch>=2.0.0
-numpy>=1.21.0
-pytest>=7.0.0
-scipy>=1.8.0
-
-# Optional dependencies for enhanced functionality
-matplotlib>=3.5.0  # For plotting in validation scripts
-pyyaml>=6.0       # For configuration files

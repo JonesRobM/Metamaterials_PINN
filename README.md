@@ -151,10 +151,16 @@ spp_metamaterial_pinn/
 git clone https://github.com/yourusername/spp-metamaterial-pinn.git
 cd spp-metamaterial-pinn
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the project and its dependencies
+# For users:
+pip install .
 
-# Validate physics implementation
+# For developers (editable install):
+pip install -e .
+```
+
+### Validate physics implementation
+```bash
 python validate_physics.py
 ```
 
