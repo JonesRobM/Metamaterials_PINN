@@ -1,0 +1,39 @@
+# SPP Problem Configuration
+
+# --- Simulation Domain ---
+x_range: [-1.0e-6, 1.0e-6]
+y_range: [-1.0e-6, 1.0e-6]
+z_range: [-1.0e-6, 1.0e-6]
+interface_z: 0.0
+
+# --- Material Properties ---
+# For a Silver/Air interface at 633nm
+metal_permittivity: [-19, 0.53] # Complex permittivity of Silver (real, imag)
+dielectric_permittivity: 1.0 # Permittivity of Air
+
+# --- Wave Properties ---
+frequency: 4.74e14 # Frequency corresponding to 633nm wavelength
+
+# --- PINN Model ---
+model:
+  name: "SPPNetwork"
+  spatial_dim: 3
+  field_components: 6
+  hidden_dims: [128, 128, 128, 128]
+  complex_valued: True
+  use_fourier: True
+  fourier_modes: 128
+  activation_type: 'complex_tanh'
+
+# --- Training Parameters ---
+training:
+  num_epochs: 10000
+  learning_rate: 1.0e-4
+  num_collocation_points: 20000
+  num_interface_points: 2000
+  
+  # Loss weights (will be adapted by EM_CompositeLoss)
+  loss_weights:
+    maxwell_curl: 1.0
+    tangential_continuity: 10.0
+    spp_boundary: 1.0

@@ -54,12 +54,22 @@ class BoundaryConditions:
         if b.dim() == 1:
             b = b.unsqueeze(0)
             
-        cross = torch.zeros_like(a)
-        cross[:, 0] = a[:, 1] * b[:, 2] - a[:, 2] * b[:, 1]
-        cross[:, 1] = a[:, 2] * b[:, 0] - a[:, 0] * b[:, 2]
-        cross[:, 2] = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
-        
-        return cross
+        if a.is_complex() or b.is_complex():
+            a_real = a.real if a.is_complex() else a
+            a_imag = a.imag if a.is_complex() else torch.zeros_like(a_real)
+            b_real = b.real if b.is_complex() else b
+            b_imag = b.imag if b.is_complex() else torch.zeros_like(b_real)
+            
+            real_part = self.cross_product(a_real, b_real) - self.cross_product(a_imag, b_imag)
+            imag_part = self.cross_product(a_real, b_imag) + self.cross_product(a_imag, b_real)
+            
+            return torch.complex(real_part, imag_part)
+        else:
+            cross = torch.zeros_like(a)
+            cross[:, 0] = a[:, 1] * b[:, 2] - a[:, 2] * b[:, 1]
+            cross[:, 1] = a[:, 2] * b[:, 0] - a[:, 0] * b[:, 2]
+            cross[:, 2] = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
+            return cross
     
     def tangential_E_continuity(self, E1: torch.Tensor, E2: torch.Tensor) -> torch.Tensor:
         """

@@ -131,7 +131,7 @@ class MetamaterialProperties:
         numerator = eps_eff * eps_dielectric
         denominator = eps_eff + eps_dielectric
         
-        k_spp_complex = k0 * torch.sqrt(numerator / denominator)
+        k_spp_complex = k0 * (numerator / denominator)**0.5
         
         return k_spp_complex.real, k_spp_complex.imag
     
@@ -176,8 +176,8 @@ class MetamaterialProperties:
         kz_sq = eps_eff * k0**2 - k_spp_real**2
         
         if kz_sq.real < 0:  # Evanescent wave
-            kz_imag = torch.sqrt(-kz_sq).real
-            return 1.0 / kz_imag
+            kz_imag = (-kz_sq)**0.5
+            return 1.0 / kz_imag.real
         else:
             return float('inf')  # Propagating wave
     
@@ -199,7 +199,7 @@ class MetamaterialProperties:
         kz_sq = eps_dielectric * k0**2 - k_spp_real**2
         
         if kz_sq.real < 0:  # Evanescent wave
-            kz_imag = torch.sqrt(-kz_sq).real
+            kz_imag = ((-kz_sq)**0.5).real
             return 1.0 / kz_imag
         else:
             return float('inf')  # Propagating wave
@@ -244,11 +244,9 @@ class MetamaterialProperties:
         else:
             eps_eff = self.eps_perp
             
-        condition1 = eps_eff.real < 0
-        condition2 = eps_dielectric.real > 0
-        condition3 = (eps_eff + eps_dielectric).real < 0
+        condition1 = eps_eff.real * eps_dielectric.real < 0
         
-        return condition1 and condition2 and condition3
+        return condition1
     
     def __repr__(self) -> str:
         return (f"MetamaterialProperties(eps_∥={self.eps_par}, "

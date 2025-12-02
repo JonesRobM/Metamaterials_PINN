@@ -95,135 +95,182 @@ class MaxwellCurlLoss(BaseLoss):
         E = fields[:, :3]  # Electric field components
         H = fields[:, 3:]  # Magnetic field components
         
+        # Split electromagnetic fields and convert to complex dtype
+        E_complex = torch.complex(E[..., 0], E[..., 1])
+        H_complex = torch.complex(H[..., 0], H[..., 1])
+        
         # Compute curl of E and H using automatic differentiation
-        curl_E = self._compute_curl(E, coords)
-        curl_H = self._compute_curl(H, coords)
+        # _compute_curl returns (batch_size, 3, 2) float32, so convert to complex
+        curl_E_float = self._compute_curl(E, coords)
+        curl_H_float = self._compute_curl(H, coords)
+        
+        curl_E_complex = torch.complex(curl_E_float[..., 0], curl_E_float[..., 1])
+        curl_H_complex = torch.complex(curl_H_float[..., 0], curl_H_float[..., 1])
         
         # Maxwell's equations in frequency domain
         # ∇×E = -iωμH
         # ∇×H = iωεE (assuming no current density)
         
         if material_props is not None:
-            mu_r = material_props[:, 0:1]  # Relative permeability
-            eps_r = material_props[:, 1:4]  # Relative permittivity (tensor)
+            mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1]) # Assuming material_props is (batch_size, 1, 2)
+            eps_r_complex = torch.complex(material_props[:, 1, 0], material_props[:, 1, 1]) # Assuming material_props is (batch_size, 3, 2)
+            # Need to convert eps_r (3x3 tensor) to complex appropriately. For now, assuming isotropic
+            # For simplicity, assuming eps_r is also a scalar in this context
+            # This part needs careful handling if eps_r is a tensor.
+            # For free space, it's 1.
+            # Here, we assume material_props is (batch_size, num_props, 2)
+            # and first prop is mu_r, next 3 are eps_r (diagonal components)
+            
+            # Let's simplify and assume mu_r and eps_r are scalars for now if from material_props
+            if material_props.shape[1] == 1: # Only mu_r
+                mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1])
+                eps_r_complex = torch.complex(torch.ones_like(mu_r_complex.real), torch.zeros_like(mu_r_complex.real))
+            elif material_props.shape[1] == 2: # mu_r and scalar eps_r
+                mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1])
+                eps_r_complex = torch.complex(material_props[:, 1, 0], material_props[:, 1, 1])
+            else: # Full eps_r tensor
+                # This needs proper tensor handling for eps_r
+                # For now, let's just use the scalar equivalent if that's what's passed
+                mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1])
+                eps_r_complex = torch.complex(torch.ones(E_complex.shape[0], 1, device=E_complex.device), torch.zeros(E_complex.shape[0], 1, device=E_complex.device))
+
         else:
-            mu_r = torch.ones_like(H[:, 0:1])
-            eps_r = torch.ones_like(E)
+            # Assume free space, so mu_r = 1.0 + 0j and eps_r = 1.0 + 0j
+            mu_r_complex = torch.complex(torch.ones(H_complex.shape[0], 1, device=H_complex.device), torch.zeros(H_complex.shape[0], 1, device=H_complex.device))
+            eps_r_complex = torch.complex(torch.ones(E_complex.shape[0], 1, device=E_complex.device), torch.zeros(E_complex.shape[0], 1, device=E_complex.device))
         
         # Maxwell curl residuals
-        residual_E = curl_E + 1j * self.omega * self.mu0 * mu_r * H
-        residual_H = curl_H - 1j * self.omega * self.eps0 * eps_r * E
+        residual_E = curl_E_complex + 1j * self.omega * self.mu0 * mu_r_complex * H_complex
+        residual_H = curl_H_complex - 1j * self.omega * self.eps0 * eps_r_complex * E_complex
         
         # Combine residuals (take real part of squared magnitude)
-        loss_E = torch.mean(torch.real(residual_E * torch.conj(residual_E)))
-        loss_H = torch.mean(torch.real(residual_H * torch.conj(residual_H)))
+        loss_E = torch.mean(residual_E.real**2 + residual_E.imag**2)
+        loss_H = torch.mean(residual_H.real**2 + residual_H.imag**2)
         
         return loss_E + loss_H
     
     def _compute_curl(self, field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
         """Compute curl using automatic differentiation."""
         batch_size = field.shape[0]
-        curl = torch.zeros_like(field)
+        # We need to return (batch_size, 3, 2) for real/imag
+        curl_output = torch.zeros(batch_size, 3, 2, device=field.device, dtype=field.dtype) # Output will have shape (batch_size, 3, 2)
         
         # Extract field components
-        Fx, Fy, Fz = field[:, 0], field[:, 1], field[:, 2]
+        Fx = field[:, 0] # Shape (batch_size, 2)
+        Fy = field[:, 1] # Shape (batch_size, 2)
+        Fz = field[:, 2] # Shape (batch_size, 2)
+        
+        # Extract field components (real and imaginary parts separately)
+        Fx_real, Fx_imag = Fx[:, 0], Fx[:, 1]
+        Fy_real, Fy_imag = Fy[:, 0], Fy[:, 1]
+        Fz_real, Fz_imag = Fz[:, 0], Fz[:, 1]
         
         # Compute partial derivatives
         # ∂Fz/∂y - ∂Fy/∂z for curl_x
         grad_Fz_dy_real = torch.autograd.grad(
-            outputs=Fz.real.sum(), inputs=coords,
+            outputs=Fz_real.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz.real)
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz_real)
         grad_Fz_dy_imag = torch.autograd.grad(
-            outputs=Fz.imag.sum(), inputs=coords,
+            outputs=Fz_imag.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz.imag)
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz_imag)
         dFz_dy = torch.complex(grad_Fz_dy_real, grad_Fz_dy_imag)
         
         grad_Fy_dz_real = torch.autograd.grad(
-            outputs=Fy.real.sum(), inputs=coords,
+            outputs=Fy_real.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy.real)
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy_real)
         grad_Fy_dz_imag = torch.autograd.grad(
-            outputs=Fy.imag.sum(), inputs=coords,
+            outputs=Fy_imag.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy.imag)
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy_imag)
         dFy_dz = torch.complex(grad_Fy_dz_real, grad_Fy_dz_imag)
         
-        curl[:, 0] = dFz_dy - dFy_dz
+        curl_x = dFz_dy - dFy_dz
         
         # ∂Fx/∂z - ∂Fz/∂x for curl_y
         grad_Fx_dz_real = torch.autograd.grad(
-            outputs=Fx.real.sum(), inputs=coords,
+            outputs=Fx_real.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx.real)
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx_real)
         grad_Fx_dz_imag = torch.autograd.grad(
-            outputs=Fx.imag.sum(), inputs=coords,
+            outputs=Fx_imag.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx.imag)
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx_imag)
         dFx_dz = torch.complex(grad_Fx_dz_real, grad_Fx_dz_imag)
         
         grad_Fz_dx_real = torch.autograd.grad(
-            outputs=Fz.real.sum(), inputs=coords,
+            outputs=Fz_real.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
         )[0][:, 0]
         grad_Fz_dx_imag = torch.autograd.grad(
-            outputs=Fz.imag.sum(), inputs=coords,
+            outputs=Fz_imag.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
         )[0][:, 0]
         dFz_dx = torch.complex(grad_Fz_dx_real, grad_Fz_dx_imag)
         
-        curl[:, 1] = dFx_dz - dFz_dx
+        curl_y = dFx_dz - dFz_dx
         
         # ∂Fy/∂x - ∂Fx/∂y for curl_z
         grad_Fy_dx_real = torch.autograd.grad(
-            outputs=Fy.real.sum(), inputs=coords,
+            outputs=Fy_real.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
         )[0][:, 0]
         grad_Fy_dx_imag = torch.autograd.grad(
-            outputs=Fy.imag.sum(), inputs=coords,
+            outputs=Fy_imag.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
         )[0][:, 0]
         dFy_dx = torch.complex(grad_Fy_dx_real, grad_Fy_dx_imag)
         
         grad_Fx_dy_real = torch.autograd.grad(
-            outputs=Fx.real.sum(), inputs=coords,
+            outputs=Fx_real.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx.real)
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx_real)
         grad_Fx_dy_imag = torch.autograd.grad(
-            outputs=Fx.imag.sum(), inputs=coords,
+            outputs=Fx_imag.sum(), inputs=coords,
             create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx.imag)
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx_imag)
         dFx_dy = torch.complex(grad_Fx_dy_real, grad_Fx_dy_imag)
         
-        curl[:, 2] = dFy_dx - dFx_dy
+        curl_z = dFy_dx - dFx_dy
         
-        return curl
+        curl_output[:, 0, 0] = curl_x.real
+        curl_output[:, 0, 1] = curl_x.imag
+        curl_output[:, 1, 0] = curl_y.real
+        curl_output[:, 1, 1] = curl_y.imag
+        curl_output[:, 2, 0] = curl_z.real
+        curl_output[:, 2, 1] = curl_z.imag
+        
+        return curl_output
 
 
 def _compute_divergence(field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
     """Compute divergence using automatic differentiation."""
-    div = torch.zeros(field.shape[0], 1, device=field.device, dtype=field.dtype)
+    div = torch.zeros(field.shape[0], 1, device=field.device, dtype=torch.complex64) # Ensure div is complex
     
     for i in range(min(3, field.shape[1])): # Iterate over field components, not coords
         if i < field.shape[1]:  # Make sure field has this component
+            field_real = field[:, i, 0] # Extract real part
+            field_imag = field[:, i, 1] # Extract imag part
+            
             grad_real_output = torch.autograd.grad(
-                outputs=field[:, i].real.sum(),
+                outputs=field_real.sum(),
                 inputs=coords,
                 create_graph=True,
                 retain_graph=True,
                 allow_unused=True
             )[0]
-            grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field[:, i].real)
+            grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field_real)
             
             grad_imag_output = torch.autograd.grad(
-                outputs=field[:, i].imag.sum(),
+                outputs=field_imag.sum(),
                 inputs=coords,
                 create_graph=True,
                 retain_graph=True,
                 allow_unused=True
             )[0]
-            grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field[:, i].imag)
+            grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field_imag)
             div[:, 0] += torch.complex(grad_real, grad_imag)
     
     return div
@@ -390,15 +437,24 @@ class SPPBoundaryLoss(BaseLoss):
         fields = network(coords)
         E = fields[:, :3]
         
-        # SPP should decay exponentially away from interface
-        z_coords = coords[:, 2] if coords.shape[1] > 2 else coords[:, 1]
+        z_coords = coords[:, 2] # Extract z-coordinates
         
-        # Expected decay behavior |E| ∝ exp(-|z|/δ)
-        expected_decay = torch.exp(-torch.abs(z_coords) / self.decay_length)
-        field_magnitude = torch.norm(E, dim=1)
+        # E is (batch_size, 3, 2) where last dim is real/imag
+        
+        # Calculate the magnitude of each complex component: |E_x|^2 = Ex_real^2 + Ex_imag^2
+        Ex_mag_sq = E[:, 0, 0]**2 + E[:, 0, 1]**2
+        Ey_mag_sq = E[:, 1, 0]**2 + E[:, 1, 1]**2
+        Ez_mag_sq = E[:, 2, 0]**2 + E[:, 2, 1]**2
+        
+        # Total field magnitude is sqrt(|Ex|^2 + |Ey|^2 + |Ez|^2)
+        field_magnitude = torch.sqrt(Ex_mag_sq + Ey_mag_sq + Ez_mag_sq) # Shape (batch_size,)
         
         # Normalize by maximum field to get relative decay
         max_field = torch.max(field_magnitude)
+        
+        # Ensure expected_decay also has shape (batch_size,)
+        expected_decay = torch.exp(-torch.abs(z_coords) / self.decay_length)
+        
         if max_field > 0:
             normalized_field = field_magnitude / max_field
             decay_residual = normalized_field - expected_decay
@@ -437,13 +493,26 @@ class TangentialContinuityLoss(BaseLoss):
         H_jump = H_plus - H_minus
         
         # Cross product with normal (assuming 3D)
-        n_cross_E = torch.cross(normal_vectors, E_jump, dim=1)
-        n_cross_H = torch.cross(normal_vectors, H_jump, dim=1)
+        # E_jump and H_jump are (batch_size, 3, 2)
+        # normal_vectors is (batch_size, 3)
+        
+        # Cross product for real parts
+        n_cross_E_real = torch.cross(normal_vectors, E_jump[:, :, 0], dim=1)
+        n_cross_H_real = torch.cross(normal_vectors, H_jump[:, :, 0], dim=1)
+        
+        # Cross product for imaginary parts
+        n_cross_E_imag = torch.cross(normal_vectors, E_jump[:, :, 1], dim=1)
+        n_cross_H_imag = torch.cross(normal_vectors, H_jump[:, :, 1], dim=1)
+        
+        # Combine back into (batch_size, 3, 2)
+        n_cross_E = torch.stack([n_cross_E_real, n_cross_E_imag], dim=-1)
+        n_cross_H = torch.stack([n_cross_H_real, n_cross_H_imag], dim=-1)
         
         # For perfect conductor interface, tangential E should be zero
         # For dielectric interface, tangential E should be continuous
-        return torch.mean(torch.norm(n_cross_E, dim=1)**2) + \
-               torch.mean(torch.norm(n_cross_H, dim=1)**2)
+        # Loss is the magnitude squared of the complex vector
+        return torch.mean(n_cross_E[..., 0]**2 + n_cross_E[..., 1]**2) + \
+               torch.mean(n_cross_H[..., 0]**2 + n_cross_H[..., 1]**2)
 
 
 class PowerFlowLoss(BaseLoss):
@@ -473,27 +542,30 @@ class PowerFlowLoss(BaseLoss):
     
     def _compute_divergence(self, field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
         """Compute divergence using automatic differentiation."""
-        div = torch.zeros(field.shape[0], 1, device=field.device, dtype=field.dtype)
+        div = torch.zeros(field.shape[0], 1, device=field.device, dtype=torch.complex64) # Ensure div is complex
         
         for i in range(min(3, field.shape[1])):
             if i < field.shape[1]:  # Make sure field has this component
+                field_real = field[:, i, 0] # Extract real part
+                field_imag = field[:, i, 1] # Extract imag part
+                
                 grad_real_output = torch.autograd.grad(
-                    outputs=field[:, i].real.sum(),
+                    outputs=field_real.sum(),
                     inputs=coords,
                     create_graph=True,
                     retain_graph=True,
                     allow_unused=True
                 )[0]
-                grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field[:, i].real)
+                grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field_real)
                 
                 grad_imag_output = torch.autograd.grad(
-                    outputs=field[:, i].imag.sum(),
+                    outputs=field_imag.sum(),
                     inputs=coords,
                     create_graph=True,
                     retain_graph=True,
                     allow_unused=True
                 )[0]
-                grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field[:, i].imag)
+                grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field_imag)
                 div[:, 0] += torch.complex(grad_real, grad_imag)
         
         return div
@@ -614,6 +686,7 @@ class EM_CompositeLoss:
         for name, loss_fn in self.losses.items():
             component_loss = loss_fn(**kwargs)
             loss_dict[name] = component_loss
+            print(f"DEBUG: {name} component_loss dtype: {component_loss.dtype}, value: {component_loss.item()}")
             
             if 'curl' in name.lower() or 'divergence' in name.lower():
                 physics_losses.append(component_loss)

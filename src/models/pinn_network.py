@@ -221,7 +221,7 @@ class ElectromagneticPINN(nn.Module):
             self.fourier_encoder = FourierEMFeatures(
                 input_dim, fourier_modes, (0.1, 20.0)
             )
-            first_layer_input = fourier_modes * 2 + input_dim
+            first_layer_input = input_dim + fourier_modes
         else:
             self.fourier_encoder = None
             first_layer_input = input_dim
@@ -267,10 +267,16 @@ class ElectromagneticPINN(nn.Module):
         for module in self.modules():
             if isinstance(module, (nn.Linear, ComplexLinear)):
                 # Smaller initialisation for EM problems
-                if hasattr(module, 'weight'):
+                if isinstance(module, ComplexLinear):
+                    nn.init.xavier_normal_(module.weight_real, gain=0.5)
+                    nn.init.xavier_normal_(module.weight_imag, gain=0.5)
+                    if module.bias_real is not None:
+                        nn.init.zeros_(module.bias_real)
+                        nn.init.zeros_(module.bias_imag)
+                else: # nn.Linear
                     nn.init.xavier_normal_(module.weight, gain=0.5)
-                if hasattr(module, 'bias') and module.bias is not None:
-                    nn.init.zeros_(module.bias)
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
     
     def forward(self, coords: torch.Tensor) -> torch.Tensor:
         """
@@ -374,8 +380,8 @@ class SPPNetwork(ElectromagneticPINN):
     
     def _calculate_spp_wavevector(self) -> complex:
         """Calculate SPP wavevector from material properties."""
-        eps_m = self.eps_metal
-        eps_d = self.eps_dielectric
+        eps_m = torch.tensor(self.eps_metal, dtype=torch.complex64)
+        eps_d = torch.tensor(self.eps_dielectric, dtype=torch.complex64)
         
         k_spp = self.k0 * torch.sqrt((eps_m * eps_d) / (eps_m + eps_d))
         return k_spp
