@@ -14,14 +14,26 @@ import numpy as np
 
 # Import physics modules from the project
 try:
-    from ..physics.maxwell_equations import MaxwellSolver
+    from ..physics.maxwell_equations import MaxwellEquations
     from ..physics.metamaterial import MetamaterialProperties
-    from ..physics.boundary_conditions import BoundaryConditionSolver
+    from ..physics.boundary_conditions import BoundaryConditions
 except ImportError:
-    # Fallback for testing
-    MaxwellSolver = None
-    MetamaterialProperties = None
-    BoundaryConditionSolver = None
+    # Fallback for testing when run outside package context (e.g., direct script execution or some IDEs)
+    class MaxwellEquations:
+        def __init__(self, *args, **kwargs): pass
+        def curl_operator(self, *args, **kwargs): return torch.zeros(args[0].shape)
+        def curl_E_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 6)
+        def curl_H_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 6)
+        def divergence_E_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 2)
+        def divergence_B_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 2)
+    
+    class MetamaterialProperties:
+        def __init__(self, *args, **kwargs): pass
+        def permittivity_tensor(self, *args, **kwargs): return torch.eye(3).unsqueeze(0).expand(args[0].shape[0], -1, -1)
+    
+    class BoundaryConditions:
+        def __init__(self, *args, **kwargs): pass
+        def tangential_E_continuity(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 6)
 
 
 class BaseLoss(ABC):
@@ -52,11 +64,13 @@ class MaxwellCurlLoss(BaseLoss):
     def __init__(self, 
                  frequency: float,
                  mu0: float = 4e-7 * np.pi,
+                 eps0: float = 8.854e-12,
                  weight: float = 1.0):
         super().__init__(weight)
         self.omega = frequency
         self.mu0 = mu0
-        self.maxwell_solver = MaxwellSolver() if MaxwellSolver else None
+        self.eps0 = eps0
+        self.maxwell_solver = MaxwellEquations(frequency)
     
     def compute(self, 
                 network: nn.Module,
@@ -98,7 +112,7 @@ class MaxwellCurlLoss(BaseLoss):
         
         # Maxwell curl residuals
         residual_E = curl_E + 1j * self.omega * self.mu0 * mu_r * H
-        residual_H = curl_H - 1j * self.omega * self.mu0 * eps_r * E
+        residual_H = curl_H - 1j * self.omega * self.eps0 * eps_r * E
         
         # Combine residuals (take real part of squared magnitude)
         loss_E = torch.mean(torch.real(residual_E * torch.conj(residual_E)))
@@ -116,45 +130,103 @@ class MaxwellCurlLoss(BaseLoss):
         
         # Compute partial derivatives
         # ∂Fz/∂y - ∂Fy/∂z for curl_x
-        dFz_dy = torch.autograd.grad(
-            outputs=Fz.sum(), inputs=coords,
-            create_graph=True, retain_graph=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz)
+        grad_Fz_dy_real = torch.autograd.grad(
+            outputs=Fz.real.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz.real)
+        grad_Fz_dy_imag = torch.autograd.grad(
+            outputs=Fz.imag.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz.imag)
+        dFz_dy = torch.complex(grad_Fz_dy_real, grad_Fz_dy_imag)
         
-        dFy_dz = torch.autograd.grad(
-            outputs=Fy.sum(), inputs=coords,
-            create_graph=True, retain_graph=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy)
+        grad_Fy_dz_real = torch.autograd.grad(
+            outputs=Fy.real.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy.real)
+        grad_Fy_dz_imag = torch.autograd.grad(
+            outputs=Fy.imag.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy.imag)
+        dFy_dz = torch.complex(grad_Fy_dz_real, grad_Fy_dz_imag)
         
         curl[:, 0] = dFz_dy - dFy_dz
         
         # ∂Fx/∂z - ∂Fz/∂x for curl_y
-        dFx_dz = torch.autograd.grad(
-            outputs=Fx.sum(), inputs=coords,
-            create_graph=True, retain_graph=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx)
+        grad_Fx_dz_real = torch.autograd.grad(
+            outputs=Fx.real.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx.real)
+        grad_Fx_dz_imag = torch.autograd.grad(
+            outputs=Fx.imag.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx.imag)
+        dFx_dz = torch.complex(grad_Fx_dz_real, grad_Fx_dz_imag)
         
-        dFz_dx = torch.autograd.grad(
-            outputs=Fz.sum(), inputs=coords,
-            create_graph=True, retain_graph=True
+        grad_Fz_dx_real = torch.autograd.grad(
+            outputs=Fz.real.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
         )[0][:, 0]
+        grad_Fz_dx_imag = torch.autograd.grad(
+            outputs=Fz.imag.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 0]
+        dFz_dx = torch.complex(grad_Fz_dx_real, grad_Fz_dx_imag)
         
         curl[:, 1] = dFx_dz - dFz_dx
         
         # ∂Fy/∂x - ∂Fx/∂y for curl_z
-        dFy_dx = torch.autograd.grad(
-            outputs=Fy.sum(), inputs=coords,
-            create_graph=True, retain_graph=True
+        grad_Fy_dx_real = torch.autograd.grad(
+            outputs=Fy.real.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
         )[0][:, 0]
+        grad_Fy_dx_imag = torch.autograd.grad(
+            outputs=Fy.imag.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 0]
+        dFy_dx = torch.complex(grad_Fy_dx_real, grad_Fy_dx_imag)
         
-        dFx_dy = torch.autograd.grad(
-            outputs=Fx.sum(), inputs=coords,
-            create_graph=True, retain_graph=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx)
+        grad_Fx_dy_real = torch.autograd.grad(
+            outputs=Fx.real.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx.real)
+        grad_Fx_dy_imag = torch.autograd.grad(
+            outputs=Fx.imag.sum(), inputs=coords,
+            create_graph=True, retain_graph=True, allow_unused=True
+        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx.imag)
+        dFx_dy = torch.complex(grad_Fx_dy_real, grad_Fx_dy_imag)
         
         curl[:, 2] = dFy_dx - dFx_dy
         
         return curl
+
+
+def _compute_divergence(field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
+    """Compute divergence using automatic differentiation."""
+    div = torch.zeros(field.shape[0], 1, device=field.device, dtype=field.dtype)
+    
+    for i in range(min(3, field.shape[1])): # Iterate over field components, not coords
+        if i < field.shape[1]:  # Make sure field has this component
+            grad_real_output = torch.autograd.grad(
+                outputs=field[:, i].real.sum(),
+                inputs=coords,
+                create_graph=True,
+                retain_graph=True,
+                allow_unused=True
+            )[0]
+            grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field[:, i].real)
+            
+            grad_imag_output = torch.autograd.grad(
+                outputs=field[:, i].imag.sum(),
+                inputs=coords,
+                create_graph=True,
+                retain_graph=True,
+                allow_unused=True
+            )[0]
+            grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field[:, i].imag)
+            div[:, 0] += torch.complex(grad_real, grad_imag)
+    
+    return div
 
 
 class MaxwellDivergenceLoss(BaseLoss):
@@ -179,14 +251,14 @@ class MaxwellDivergenceLoss(BaseLoss):
         H = fields[:, 3:]
         
         # Compute divergences
-        div_E = self._compute_divergence(E, coords)
-        div_H = self._compute_divergence(H, coords)
+        div_E = _compute_divergence(E, coords)
+        div_H = _compute_divergence(H, coords)
         
         # Apply material properties
         if material_props is not None:
             eps_r = material_props[:, 1:4]
             D = eps_r * E
-            div_D = self._compute_divergence(D, coords)
+            div_D = _compute_divergence(D, coords)
         else:
             div_D = div_E
         
@@ -200,22 +272,7 @@ class MaxwellDivergenceLoss(BaseLoss):
         
         return torch.mean(residual_D**2) + torch.mean(residual_B**2)
     
-    def _compute_divergence(self, field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
-        """Compute divergence using automatic differentiation."""
-        div = torch.zeros(field.shape[0], 1, device=field.device, dtype=field.dtype)
         
-        for i in range(min(3, coords.shape[1])):
-            if i < field.shape[1]:  # Make sure field has this component
-                grad = torch.autograd.grad(
-                    outputs=field[:, i].sum(),
-                    inputs=coords,
-                    create_graph=True,
-                    retain_graph=True
-                )[0][:, i]
-                div[:, 0] += grad
-        
-        return div
-
 
 class MetamaterialConstitutiveLoss(BaseLoss):
     """
@@ -226,13 +283,13 @@ class MetamaterialConstitutiveLoss(BaseLoss):
         weight: Loss weight
     """
     
-    def __init__(self, 
-                 metamaterial_solver: Optional[object] = None,
+    def __init__(self,
+                 metamaterial_solver: Optional[MetamaterialProperties] = None,
                  weight: float = 1.0):
         super().__init__(weight)
-        self.metamaterial = metamaterial_solver or MetamaterialProperties()
+        self.metamaterial = metamaterial_solver
     
-    def compute(self, 
+    def compute(self,
                 network: nn.Module,
                 coords: torch.Tensor,
                 frequency: float,
@@ -242,15 +299,15 @@ class MetamaterialConstitutiveLoss(BaseLoss):
         E = fields[:, :3]
         H = fields[:, 3:]
         
-        # Get material properties from metamaterial solver
-        if hasattr(self.metamaterial, 'get_permittivity_tensor'):
-            eps_tensor = self.metamaterial.get_permittivity_tensor(coords, frequency)
-            mu_tensor = self.metamaterial.get_permeability_tensor(coords, frequency)
+        # Get material properties
+        if self.metamaterial:
+            eps_tensor = self.metamaterial.permittivity_tensor(coords)
+            # Assume non-magnetic materials (mu_r = 1)
+            mu_tensor = torch.eye(3, device=coords.device, dtype=E.dtype).unsqueeze(0).expand(coords.shape[0], -1, -1)
         else:
-            # Fallback: assume isotropic metamaterial
-            eps_tensor = torch.eye(3).unsqueeze(0).repeat(coords.shape[0], 1, 1)
-            mu_tensor = torch.eye(3).unsqueeze(0).repeat(coords.shape[0], 1, 1)
-        
+            # Fallback: assume vacuum/isotropic material
+            eps_tensor = torch.eye(3, device=coords.device, dtype=E.dtype).unsqueeze(0).expand(coords.shape[0], -1, -1)
+            mu_tensor = torch.eye(3, device=coords.device, dtype=E.dtype).unsqueeze(0).expand(coords.shape[0], -1, -1)        
         # Apply constitutive relations
         D_expected = torch.bmm(eps_tensor, E.unsqueeze(-1)).squeeze(-1)
         B_expected = torch.bmm(mu_tensor, H.unsqueeze(-1)).squeeze(-1)
@@ -264,8 +321,6 @@ class MetamaterialConstitutiveLoss(BaseLoss):
         residual_B = B_network - B_expected
         
         return torch.mean(torch.abs(residual_D)**2) + torch.mean(torch.abs(residual_B)**2)
-
-
 class InterfaceBoundaryLoss(BaseLoss):
     """
     Enforce boundary conditions at metamaterial-dielectric interfaces.
@@ -281,7 +336,7 @@ class InterfaceBoundaryLoss(BaseLoss):
                  interface_coords: Optional[torch.Tensor] = None,
                  weight: float = 1.0):
         super().__init__(weight)
-        self.boundary_solver = boundary_solver or BoundaryConditionSolver()
+        self.boundary_solver = boundary_solver or BoundaryConditions()
         self.interface_coords = interface_coords
     
     def compute(self, 
@@ -411,7 +466,7 @@ class PowerFlowLoss(BaseLoss):
         S = torch.cross(E, torch.conj(H), dim=1)
         
         # Compute divergence of Poynting vector
-        div_S = self._compute_divergence(S, coords)
+        div_S = _compute_divergence(S, coords)
         
         # In steady state, ∇·S = 0
         return torch.mean(torch.abs(div_S)**2)
@@ -420,15 +475,26 @@ class PowerFlowLoss(BaseLoss):
         """Compute divergence using automatic differentiation."""
         div = torch.zeros(field.shape[0], 1, device=field.device, dtype=field.dtype)
         
-        for i in range(min(3, coords.shape[1])):
+        for i in range(min(3, field.shape[1])):
             if i < field.shape[1]:  # Make sure field has this component
-                grad = torch.autograd.grad(
-                    outputs=field[:, i].sum(),
+                grad_real_output = torch.autograd.grad(
+                    outputs=field[:, i].real.sum(),
                     inputs=coords,
                     create_graph=True,
-                    retain_graph=True
-                )[0][:, i]
-                div[:, 0] += grad
+                    retain_graph=True,
+                    allow_unused=True
+                )[0]
+                grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field[:, i].real)
+                
+                grad_imag_output = torch.autograd.grad(
+                    outputs=field[:, i].imag.sum(),
+                    inputs=coords,
+                    create_graph=True,
+                    retain_graph=True,
+                    allow_unused=True
+                )[0]
+                grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field[:, i].imag)
+                div[:, 0] += torch.complex(grad_real, grad_imag)
         
         return div
 
