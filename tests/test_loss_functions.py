@@ -52,10 +52,14 @@ class TestMaxwellCurlLoss:
                 phase = torch.einsum('j,ij->i', self.k_vec, coords_input)                                                
                 exp_factor = torch.exp(1j * phase).unsqueeze(1)
                                                                                                                          
-                E_field = (self.E_pol.unsqueeze(0) * exp_factor)                                    
-                H_field = (self.H_pol.unsqueeze(0) * exp_factor)                                    
-                                                                                                                         
-                return torch.cat([E_field, H_field], dim=1)                                                              
+                E_field = (self.E_pol.unsqueeze(0) * exp_factor)  # [batch, 3] complex
+                H_field = (self.H_pol.unsqueeze(0) * exp_factor)  # [batch, 3] complex
+
+                # Convert to [batch, 6, 2] format: real/imag split
+                fields_complex = torch.cat([E_field, H_field], dim=1)  # [batch, 6] complex
+                fields_real_imag = torch.stack([fields_complex.real, fields_complex.imag], dim=-1)
+
+                return fields_real_imag  # Returns [batch, 6, 2] float32                                                              
                                                                                                                          
         analytical_network = AnalyticalPlaneWaveNetwork(E_pol, H_pol, k_vec)                                             
                                                                                                                          
