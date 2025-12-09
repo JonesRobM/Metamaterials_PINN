@@ -15,7 +15,7 @@ from .domain_sampler import (
     StratifiedSampler
 )
 
-from .collocation_points import (
+from .collection_points import (
     CollocationPointGenerator,
     MaxwellPointGenerator,
     BoundaryPointGenerator,

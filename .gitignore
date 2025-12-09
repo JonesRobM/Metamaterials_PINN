@@ -5,7 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
-
+*claude*
+figures/local/*
 # Distribution / packaging
 .Python
 build/
@@ -197,3 +198,5 @@ cython_debug/
 /figures/*
 !/figures/assets
 !/figures/plane_wave_E_field.png
+!/figures/analytical_plane_wave_Ey.png
+!/figures/untrained_pinn_plane_wave_Ey.png

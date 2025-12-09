@@ -131,9 +131,9 @@ class EMFieldPlotter(BasePlotter):
             # If no points in slice, use all points
             slice_mask = torch.ones(len(coords), dtype=torch.bool)
         
-        x_coords = coords[slice_mask, x_idx].cpu().numpy()
-        y_coords = coords[slice_mask, y_idx].cpu().numpy()
-        field_slice = field_values[slice_mask].cpu().numpy()
+        x_coords = coords[slice_mask, x_idx].cpu().detach().numpy()
+        y_coords = coords[slice_mask, y_idx].cpu().detach().numpy()
+        field_slice = field_values[slice_mask].cpu().detach().numpy()
         
         # Create figure
         fig, ax = plt.subplots(figsize=self.config.figsize)
