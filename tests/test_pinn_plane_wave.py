@@ -4,7 +4,7 @@ import pytest
 
 from src.models.pinn_network import ComplexPINN
 from src.physics.maxwell_equations import MaxwellEquations
-from src.data.domain_sampler import DomainSampler
+from src.data.domain_sampler import UniformSampler
 from src.models.loss_functions import MaxwellCurlLoss
 
 def test_pinn_plane_wave_solution():
@@ -30,10 +30,12 @@ def test_pinn_plane_wave_solution():
     )
 
     # Generate collocation points
-    sampler = DomainSampler(
-        x_range=(-1e-6, 1e-6),
-        y_range=(-1e-7, 1e-7),
-        z_range=(-1e-7, 1e-7)
+    sampler = UniformSampler(
+        domain_bounds=[
+            (-1e-6, 1e-6),
+            (-1e-7, 1e-7),
+            (-1e-7, 1e-7)
+        ]
     )
     # Use a small number of points for testing speed
     coords = sampler.sample_points(n_points=100)['points']
@@ -80,11 +82,10 @@ def test_pinn_plane_wave_solution():
     # Create dummy epsilon tensor for vacuum (identity matrix)
     eps_tensor = torch.eye(3, dtype=torch.complex64).unsqueeze(0).expand(coords.shape[0], -1, -1)
     
-    maxwell_loss = loss_fn.forward(
-        E_field=pinn_output[:, :3, :],
-        H_field=pinn_output[:, 3:, :],
+    maxwell_loss = loss_fn(
+        network=pinn,
         coords=coords,
-        eps_tensor=eps_tensor
+        material_props=None  # Using default vacuum properties
     )
     
     # A very simple test for now: check if the loss is not NaN or inf.
