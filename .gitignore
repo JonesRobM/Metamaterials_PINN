@@ -196,3 +196,4 @@ cython_debug/
 # Figures
 /figures/*
 !/figures/assets
+!/figures/plane_wave_E_field.png
