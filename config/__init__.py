@@ -170,8 +170,16 @@ class ConfigManager:
             raise ValueError("Learning rate must be positive")
         
         # Set device
-        if 'device' not in config:
-            config['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # Always prioritize CUDA if available, otherwise fallback to CPU
+        if torch.cuda.is_available():
+            config['device'] = 'cuda'
+            actual_device = 'cuda'
+        else:
+            config['device'] = 'cpu'
+            actual_device = 'cpu'
+
+        # Set PyTorch's default device globally
+        torch.set_default_device(actual_device)
         
         return config
     
