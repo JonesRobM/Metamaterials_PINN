@@ -200,3 +200,5 @@ cython_debug/
 !/figures/plane_wave_E_field.png
 !/figures/analytical_plane_wave_Ey.png
 !/figures/untrained_pinn_plane_wave_Ey.png
+!/figures/plane_wave_training_curve.png
+!/figures/trained_pinn_plane_wave_Ey.png
