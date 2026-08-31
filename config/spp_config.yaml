@@ -1,4 +1,17 @@
-# SPP Problem Configuration
+# ============================================================================
+# SPP Problem Configuration — standalone experiment config
+# ============================================================================
+#
+# This file is consumed directly by scripts/train_spp_pinn.py, which reads it
+# with a plain yaml.safe_load.  It deliberately uses a FLAT schema (top-level
+# x_range, frequency, metal_permittivity, ...) and is NOT part of the nested
+# project schema handled by ConfigManager.load_full_config()
+# (base_config.yaml + metamaterial_params.yaml).
+#
+# To read it through the config package use ConfigManager().load_raw
+# ("spp_config"), which performs no validation or numeric-string processing.
+# Keep the key names below stable: the training script indexes them directly.
+# ============================================================================
 
 # --- Simulation Domain ---
 x_range: [-1.0e-6, 1.0e-6]

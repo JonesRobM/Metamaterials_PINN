@@ -10,10 +10,13 @@ authors = [
 ]
 description = "A Physics-Informed Neural Network (PINN) to model and simulate Surface Plasmon Polaritons (SPPs) on metamaterial interfaces."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Development Status :: 3 - Alpha",
@@ -23,18 +26,48 @@ classifiers = [
 dependencies = [
     "torch>=2.0.0",
     "numpy>=1.21.0",
-    "pytest>=7.0.0",
     "scipy>=1.8.0",
     "matplotlib>=3.5.0",
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+]
+viz = [
+    "plotly>=5.0",
+]
+
 [project.urls]
-"Homepage" = "https://github.com/yourusername/spp-metamaterial-pinn"
-"Bug Tracker" = "https://github.com/yourusername/spp-metamaterial-pinn/issues"
+"Homepage" = "https://github.com/JonesRobM/Metamaterials_PINN"
+"Bug Tracker" = "https://github.com/JonesRobM/Metamaterials_PINN/issues"
+
+# Layout: the importable packages live at the repo root as `src` (the library)
+# and `config` (YAML config manager). `scripts/` and `examples/` are not packaged.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "config*"]
+exclude = ["tests*", "scripts*", "examples*", "docs*", "figures*"]
+
+[tool.setuptools.package-data]
+config = ["*.yaml"]
 
 [tool.pytest.ini_options]
-pythonpath = [
-  ".",
-  "src"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "slow: long-running training/integration tests (deselect with '-m \"not slow\"')",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I"]
+ignore = ["E501"]

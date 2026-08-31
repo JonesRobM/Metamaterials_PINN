@@ -1,0 +1,5 @@
+# Developer setup (CPU torch). For GPU builds install torch per https://pytorch.org first.
+#   uv venv --python 3.12 .venv && uv pip install -r requirements-dev.txt
+# or
+#   python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+-e .[dev,viz]

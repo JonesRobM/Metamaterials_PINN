@@ -37,11 +37,12 @@ SPPs are electromagnetic waves that propagate along metal-dielectric interfaces,
 - **Broadband operation** through dispersion engineering
 
 ### Maxwell's Equations in Frequency Domain
-The electromagnetic behaviour is governed by:
+With the `e^{-iωt}` time convention (so lossy media have Im ε > 0 and decaying
+waves have Im k > 0), the electromagnetic behaviour is governed by:
 
 ```
-∇ × E = -iωμ₀H    (Faraday's law)
-∇ × H = iωε₀εᵣE   (Ampère's law)  
+∇ × E =  iωμ₀H    (Faraday's law)
+∇ × H = -iωε₀εᵣE  (Ampère's law)
 ∇ · (εᵣE) = 0     (Gauss's law)
 ∇ · H = 0         (No magnetic monopoles)
 ```
@@ -77,38 +78,41 @@ L_total = λ₁L_maxwell + λ₂L_boundary + λ₃L_data + λ₄L_initial
 ### 📁 Project Structure
 
 ```
-spp_metamaterial_pinn/
-├── 🔬 src/physics/           # Core electromagnetic physics
-│   ├── maxwell_equations.py  # Frequency-domain Maxwell solver
-│   ├── metamaterial.py      # Anisotropic constitutive relations
-│   └── boundary_conditions.py # Interface continuity conditions
+Metamaterials_PINN/
+├── src/
+│   ├── constants.py          # Shared physical constants (EPS0, MU0, C0, ETA0)
+│   ├── analytical.py         # Closed-form reference solutions (plane wave, point charge)
+│   ├── physics/              # Core electromagnetic physics
+│   │   ├── maxwell_equations.py    # Frequency-domain Maxwell operators
+│   │   ├── metamaterial.py         # Anisotropic constitutive relations
+│   │   └── boundary_conditions.py  # Interface continuity conditions
+│   ├── models/               # Neural network architectures
+│   │   ├── pinn_network.py         # ElectromagneticPINN, ComplexPINN, SPPNetwork, ...
+│   │   ├── loss_functions.py       # Physics-informed loss terms
+│   │   └── electrostatics_pinn.py  # Small Laplace/point-charge PINN
+│   ├── data/
+│   │   └── domain_sampler.py       # Uniform / stratified / interface / SPP / adaptive sampling
+│   └── utils/
+│       ├── plotting.py             # Field and training visualisation
+│       └── metrics.py              # Residual, SPP and accuracy metrics
 │
-├── 🧠 src/models/            # Neural network architectures  
-│   ├── pinn_network.py      # Main PINN implementation
-│   └── loss_functions.py    # Physics-informed loss computation
-│
-├── 📊 src/data/              # Data handling and sampling
-│   ├── domain_sampler.py    # Collocation point generation
-│   └── collocation_points.py # Adaptive sampling strategies
-│
-├── 🛠️ src/utils/             # Utilities and visualisation
-│   ├── plotting.py          # Field visualisation tools
-│   └── metrics.py           # Performance assessment
-│
-├── ⚙️ config/                # Configuration management
-│   ├── base_config.yaml     # Default parameters
-│   └── metamaterial_params.yaml # Material properties
-│
-├── 🧪 tests/                 # Comprehensive test suite
-│   └── test_physics.py      # Physics validation tests
-│
-├── 📓 notebooks/             # Interactive analysis
-│   ├── model_validation.ipynb # Physics verification
-│   └── results_analysis.ipynb # Performance evaluation
-│
-└── 🚀 scripts/               # Training and evaluation
-    ├── train.py             # Main training script
-    └── evaluate.py          # Model assessment
+├── config/                   # YAML configuration and ConfigManager
+├── tests/                    # pytest suite (physics, models, losses, config, examples)
+├── scripts/                  # Entry points (all accept --help)
+│   ├── validate_physics.py         # Sanity-check the physics module
+│   ├── run_tests.py                # Run the whole test suite
+│   ├── train_plane_wave_pinn.py    # Train ComplexPINN on a free-space plane wave
+│   ├── train_point_charge_pinn.py  # Train ElectrostaticsPINN on a point charge
+│   ├── train_spp_pinn.py           # Train SPPNetwork from config/spp_config.yaml
+│   ├── visualize_pinn_plane_wave.py
+│   ├── visualize_pinn_field.py
+│   └── visualize_point_charge.py
+├── examples/
+│   └── validate_plane_wave.py      # Plane-wave validation example
+├── notebooks/                # Standalone PINN tutorials (not part of the SPP pipeline)
+├── artifacts/models/         # Trained weights (*.pth)
+├── figures/                  # Generated plots
+└── docs/
 ```
 
 ---
@@ -148,44 +152,50 @@ spp_metamaterial_pinn/
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/spp-metamaterial-pinn.git
-cd spp-metamaterial-pinn
+git clone https://github.com/JonesRobM/Metamaterials_PINN.git
+cd Metamaterials_PINN
 
-# Install the project and its dependencies
-# For users:
-pip install .
-
-# For developers (editable install):
-pip install -e .
+# Create a virtual environment and install in editable mode with dev/viz extras
+python -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+# (or: uv venv --python 3.12 .venv && uv pip install -r requirements-dev.txt)
 ```
 
-### Validate physics implementation
+### Validate the physics implementation
 ```bash
-python validate_physics.py
+.venv/bin/python scripts/validate_physics.py
+.venv/bin/python -m pytest -q          # or: python scripts/run_tests.py
 ```
 
 ### Basic Usage
 ```python
+import numpy as np
+import torch
+
 from src.physics import MaxwellEquations, MetamaterialProperties
-from src.models import SPPNetwork
+from src.models import SPPNetwork, MaxwellCurlLoss
+from src.data import UniformSampler
+
+omega = 2 * np.pi * 1e15  # 1 PHz
 
 # Define metamaterial
 metamaterial = MetamaterialProperties(
-    eps_parallel=-2.0 + 0.1j,
-    eps_perpendicular=4.0 + 0.05j,
+    eps_parallel=4.0 + 0.05j,      # along the optical axis (z, interface normal)
+    eps_perpendicular=-2.0 + 0.1j, # in-plane: negative => binds a TM surface wave
     optical_axis='z'
 )
 
-# Initialize PINN
-network = SPPNetwork(layers=[3, 64, 64, 64, 6])
+# Initialise PINN and physics loss
+network = SPPNetwork(spatial_dim=3, hidden_dims=[64, 64, 64], frequency=omega)
+loss_fn = MaxwellCurlLoss(frequency=omega)
 
-# Train on domain
-trainer = PINNTrainer(network, metamaterial)
-trainer.train(epochs=10000)
-
-# Predict fields
-E_field, H_field = network.predict(coordinates)
+# Sample collocation points and evaluate the Maxwell residual loss
+sampler = UniformSampler(domain_bounds=[(-1e-6, 1e-6)] * 3)
+coords = sampler.sample_points(n_points=1000)['points'].requires_grad_(True)
+loss = loss_fn(network=network, coords=coords)
 ```
+
+Full training loops live in `scripts/train_*.py`; see `--help` on each for options.
 
 ## 🛠️ Technical Details
 
@@ -211,7 +221,7 @@ Smart collocation point placement based on:
 Carefully balanced multi-term loss ensures physical consistency:
 
 ```python
-L = λ₁‖∇×E + iωμ₀H‖² + λ₂‖∇×H - iωε₀εᵣE‖² + 
+L = λ₁‖∇×E - iωμ₀H‖² + λ₂‖∇×H + iωε₀εᵣE‖² + 
     λ₃‖boundary_conditions‖² + λ₄‖training_data‖²
 ```
 
