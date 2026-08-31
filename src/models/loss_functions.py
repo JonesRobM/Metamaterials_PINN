@@ -1,749 +1,510 @@
 """
-Loss functions for Electromagnetic Physics-Informed Neural Networks (PINNs)
+Loss functions for electromagnetic Physics-Informed Neural Networks (PINNs).
 
-Implements loss components for Maxwell's equations in metamaterial systems,
-specifically designed for Surface Plasmon Polariton (SPP) modeling.
+Every loss wraps a network that maps coordinates ``(N, D)`` to fields in the
+real ``(N, 6, 2)`` format (``[Ex, Ey, Ez, Hx, Hy, Hz]`` × ``[Re, Im]``). The
+fields are converted to complex ``(N, 3)`` tensors with
+:mod:`src.models.field_format` and all differential operators come from
+:mod:`src.physics.differential_ops` via :class:`src.physics.MaxwellEquations`,
+so the physics and loss layers share one implementation.
+
+Sign convention: time dependence ``exp(-iωt)``, i.e. ``∇×E = iωμ₀μᵣH`` and
+``∇×H = -iωε₀εᵣE``; lossy media have ``Im(ε) > 0``.
+
+Keyword arguments understood by :meth:`EM_CompositeLoss.compute` are forwarded
+to each sub-loss only if its ``compute`` signature accepts them; see the
+individual ``compute`` docstrings for the required names.
 """
 
+from __future__ import annotations
+
+import inspect
+import logging
+from abc import ABC, abstractmethod
+from typing import Dict, Optional, Tuple, Union
+
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Callable, Dict, List, Optional, Tuple, Union
-from abc import ABC, abstractmethod
-import numpy as np
 
-# Import physics modules from the project
-try:
-    from ..physics.maxwell_equations import MaxwellEquations
-    from ..physics.metamaterial import MetamaterialProperties
-    from ..physics.boundary_conditions import BoundaryConditions
-except ImportError:
-    # Fallback for testing when run outside package context (e.g., direct script execution or some IDEs)
-    class MaxwellEquations:
-        def __init__(self, *args, **kwargs): pass
-        def curl_operator(self, *args, **kwargs): return torch.zeros(args[0].shape)
-        def curl_E_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 6)
-        def curl_H_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 6)
-        def divergence_E_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 2)
-        def divergence_B_residual(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 2)
-    
-    class MetamaterialProperties:
-        def __init__(self, *args, **kwargs): pass
-        def permittivity_tensor(self, *args, **kwargs): return torch.eye(3).unsqueeze(0).expand(args[0].shape[0], -1, -1)
-    
-    class BoundaryConditions:
-        def __init__(self, *args, **kwargs): pass
-        def tangential_E_continuity(self, *args, **kwargs): return torch.zeros(args[0].shape[0], 6)
+from ..constants import EPS0, MU0
+from ..physics.boundary_conditions import BoundaryConditions
+from ..physics.differential_ops import divergence, divergence_complex, gradient
+from ..physics.maxwell_equations import MaxwellEquations
+from ..physics.metamaterial import MetamaterialProperties
+from .field_format import to_complex
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "BaseLoss",
+    "MaxwellCurlLoss",
+    "MaxwellDivergenceLoss",
+    "InterfaceBoundaryLoss",
+    "SPPBoundaryLoss",
+    "TangentialContinuityLoss",
+    "PowerFlowLoss",
+    "WaveguideLoss",
+    "RadiationLoss",
+    "EM_CompositeLoss",
+]
+
+PermittivitySpec = Union[None, complex, torch.Tensor, MetamaterialProperties]
+
+
+def _identity_eps(coords: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    eye = torch.eye(3, device=coords.device, dtype=ref.dtype)
+    return eye.unsqueeze(0).expand(coords.shape[0], -1, -1)
+
+
+def _resolve_permittivity(spec: PermittivitySpec, coords: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    """
+    Turn a permittivity specification into an ``(N, 3, 3)`` complex tensor.
+
+    ``spec`` may be ``None`` (vacuum), a scalar, a ``(3,)`` diagonal, a ``(3, 3)``
+    tensor, an ``(N, 3, 3)`` tensor or a :class:`MetamaterialProperties`.
+    """
+    if spec is None:
+        return _identity_eps(coords, ref)
+    if isinstance(spec, MetamaterialProperties):
+        return spec.permittivity_tensor(coords).to(ref.dtype)
+    if isinstance(spec, (int, float, complex)):
+        return _identity_eps(coords, ref) * complex(spec)
+    t = torch.as_tensor(spec, device=coords.device).to(ref.dtype)
+    if t.dim() == 1 and t.shape[0] == 3:
+        t = torch.diag_embed(t)
+    if t.dim() == 2:
+        t = t.unsqueeze(0).expand(coords.shape[0], -1, -1)
+    if t.shape != (coords.shape[0], 3, 3):
+        raise ValueError(f"Unsupported permittivity shape {tuple(t.shape)}")
+    return t
+
+
+def _evaluate(network: nn.Module, coords: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Run the network and return complex ``(E, H)``."""
+    return to_complex(network(coords))
 
 
 class BaseLoss(ABC):
     """Abstract base class for electromagnetic PINN loss components."""
-    
+
     def __init__(self, weight: float = 1.0):
         self.weight = weight
-    
+
     @abstractmethod
     def compute(self, *args, **kwargs) -> torch.Tensor:
-        """Compute the loss value."""
-        pass
-    
+        """Compute the (unweighted) loss value."""
+
     def __call__(self, *args, **kwargs) -> torch.Tensor:
         return self.weight * self.compute(*args, **kwargs)
 
 
 class MaxwellCurlLoss(BaseLoss):
     """
-    Maxwell curl equation loss: ∇×E = -iωB and ∇×H = iωD + J
-    
+    Curl-equation residuals ``∇×E − iωμ₀μᵣH`` and ``∇×H + iωε₀εᵣE``.
+
     Args:
-        frequency: Angular frequency ω
-        mu0: Permeability of free space
-        weight: Loss weight
+        frequency: Angular frequency ω (rad/s).
+        mu0: Vacuum permeability.
+        eps0: Vacuum permittivity.
+        weight: Loss weight.
     """
-    
-    def __init__(self, 
-                 frequency: float,
-                 mu0: float = 4e-7 * np.pi,
-                 eps0: float = 8.854e-12,
-                 weight: float = 1.0):
+
+    def __init__(self, frequency: float, mu0: float = MU0, eps0: float = EPS0, weight: float = 1.0):
         super().__init__(weight)
         self.omega = frequency
         self.mu0 = mu0
         self.eps0 = eps0
-        self.maxwell_solver = MaxwellEquations(frequency)
-    
-    def compute(self, 
-                network: nn.Module,
-                coords: torch.Tensor,
-                material_props: Optional[torch.Tensor] = None,
-                **kwargs) -> torch.Tensor:
+        self.maxwell_solver = MaxwellEquations(frequency, mu0=mu0, eps0=eps0)
+
+    def compute(
+        self,
+        network: nn.Module,
+        coords: torch.Tensor,
+        material_props: Optional[torch.Tensor] = None,
+        epsilon: PermittivitySpec = None,
+        mu_r: Union[complex, torch.Tensor] = 1.0,
+    ) -> torch.Tensor:
         """
-        Compute Maxwell curl equation residuals.
-        
         Args:
-            network: Neural network (outputs [Ex, Ey, Ez, Hx, Hy, Hz])
-            coords: Spatial coordinates [batch_size, spatial_dim]
-            material_props: Material properties at coordinates
-            
+            network: Maps ``coords`` to fields ``(N, 6, 2)``.
+            coords: Collocation points ``(N, D)``; gradients are enabled in place.
+            material_props: Legacy ``(N, k, 2)`` tensor: row 0 is ``μᵣ`` (re, im) and,
+                if ``k >= 2``, row 1 is a scalar ``εᵣ`` (re, im). Ignored when
+                ``epsilon`` is given.
+            epsilon: Relative permittivity (``None`` = vacuum, scalar, ``(3,)``,
+                ``(3, 3)``, ``(N, 3, 3)`` or :class:`MetamaterialProperties`).
+            mu_r: Relative permeability (scalar or ``(N,)``/``(N, 1)`` tensor).
+
         Returns:
-            Curl equation loss
+            Scalar loss: mean squared magnitude of both residual vectors.
         """
         coords.requires_grad_(True)
-        fields = network(coords)  # [batch_size, 6] for Ex,Ey,Ez,Hx,Hy,Hz
-        
-        # Split electromagnetic fields
-        E = fields[:, :3]  # Electric field components
-        H = fields[:, 3:]  # Magnetic field components
-        
-        # Split electromagnetic fields and convert to complex dtype
-        E_complex = torch.complex(E[..., 0], E[..., 1])
-        H_complex = torch.complex(H[..., 0], H[..., 1])
-        
-        # Compute curl of E and H using automatic differentiation
-        # _compute_curl returns (batch_size, 3, 2) float32, so convert to complex
-        curl_E_float = self._compute_curl(E, coords)
-        curl_H_float = self._compute_curl(H, coords)
-        
-        curl_E_complex = torch.complex(curl_E_float[..., 0], curl_E_float[..., 1])
-        curl_H_complex = torch.complex(curl_H_float[..., 0], curl_H_float[..., 1])
-        
-        # Maxwell's equations in frequency domain
-        # ∇×E = -iωμH
-        # ∇×H = iωεE (assuming no current density)
-        
+        E, H = _evaluate(network, coords)
+
+        mu = mu_r
         if material_props is not None:
-            mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1]) # Assuming material_props is (batch_size, 1, 2)
-            eps_r_complex = torch.complex(material_props[:, 1, 0], material_props[:, 1, 1]) # Assuming material_props is (batch_size, 3, 2)
-            # Need to convert eps_r (3x3 tensor) to complex appropriately. For now, assuming isotropic
-            # For simplicity, assuming eps_r is also a scalar in this context
-            # This part needs careful handling if eps_r is a tensor.
-            # For free space, it's 1.
-            # Here, we assume material_props is (batch_size, num_props, 2)
-            # and first prop is mu_r, next 3 are eps_r (diagonal components)
-            
-            # Let's simplify and assume mu_r and eps_r are scalars for now if from material_props
-            if material_props.shape[1] == 1: # Only mu_r
-                mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1])
-                eps_r_complex = torch.complex(torch.ones_like(mu_r_complex.real), torch.zeros_like(mu_r_complex.real))
-            elif material_props.shape[1] == 2: # mu_r and scalar eps_r
-                mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1])
-                eps_r_complex = torch.complex(material_props[:, 1, 0], material_props[:, 1, 1])
-            else: # Full eps_r tensor
-                # This needs proper tensor handling for eps_r
-                # For now, let's just use the scalar equivalent if that's what's passed
-                mu_r_complex = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1])
-                eps_r_complex = torch.complex(torch.ones(E_complex.shape[0], 1, device=E_complex.device), torch.zeros(E_complex.shape[0], 1, device=E_complex.device))
+            mu = torch.complex(material_props[:, 0, 0], material_props[:, 0, 1]).unsqueeze(1)
+            if epsilon is None and material_props.shape[1] >= 2:
+                epsilon = torch.complex(material_props[:, 1, 0], material_props[:, 1, 1])
+                epsilon = epsilon.unsqueeze(1).unsqueeze(2) * torch.eye(3, device=E.device, dtype=E.dtype)
+        if isinstance(mu, torch.Tensor) and mu.dim() == 1:
+            mu = mu.unsqueeze(1)
 
-        else:
-            # Assume free space, so mu_r = 1.0 + 0j and eps_r = 1.0 + 0j
-            mu_r_complex = torch.complex(torch.ones(H_complex.shape[0], 1, device=H_complex.device), torch.zeros(H_complex.shape[0], 1, device=H_complex.device))
-            eps_r_complex = torch.complex(torch.ones(E_complex.shape[0], 1, device=E_complex.device), torch.zeros(E_complex.shape[0], 1, device=E_complex.device))
-        
-        # Maxwell curl residuals
-        residual_E = curl_E_complex + 1j * self.omega * self.mu0 * mu_r_complex * H_complex
-        residual_H = curl_H_complex - 1j * self.omega * self.eps0 * eps_r_complex * E_complex
-        
-        # Combine residuals (take real part of squared magnitude)
-        loss_E = torch.mean(residual_E.real**2 + residual_E.imag**2)
-        loss_H = torch.mean(residual_H.real**2 + residual_H.imag**2)
-        
-        return loss_E + loss_H
-    
-    def _compute_curl(self, field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
-        """Compute curl using automatic differentiation."""
-        batch_size = field.shape[0]
-        # We need to return (batch_size, 3, 2) for real/imag
-        curl_output = torch.zeros(batch_size, 3, 2, device=field.device, dtype=field.dtype) # Output will have shape (batch_size, 3, 2)
-        
-        # Extract field components
-        Fx = field[:, 0] # Shape (batch_size, 2)
-        Fy = field[:, 1] # Shape (batch_size, 2)
-        Fz = field[:, 2] # Shape (batch_size, 2)
-        
-        # Extract field components (real and imaginary parts separately)
-        Fx_real, Fx_imag = Fx[:, 0], Fx[:, 1]
-        Fy_real, Fy_imag = Fy[:, 0], Fy[:, 1]
-        Fz_real, Fz_imag = Fz[:, 0], Fz[:, 1]
-        
-        # Compute partial derivatives
-        # ∂Fz/∂y - ∂Fy/∂z for curl_x
-        grad_Fz_dy_real = torch.autograd.grad(
-            outputs=Fz_real.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz_real)
-        grad_Fz_dy_imag = torch.autograd.grad(
-            outputs=Fz_imag.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fz_imag)
-        dFz_dy = torch.complex(grad_Fz_dy_real, grad_Fz_dy_imag)
-        
-        grad_Fy_dz_real = torch.autograd.grad(
-            outputs=Fy_real.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy_real)
-        grad_Fy_dz_imag = torch.autograd.grad(
-            outputs=Fy_imag.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fy_imag)
-        dFy_dz = torch.complex(grad_Fy_dz_real, grad_Fy_dz_imag)
-        
-        curl_x = dFz_dy - dFy_dz
-        
-        # ∂Fx/∂z - ∂Fz/∂x for curl_y
-        grad_Fx_dz_real = torch.autograd.grad(
-            outputs=Fx_real.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx_real)
-        grad_Fx_dz_imag = torch.autograd.grad(
-            outputs=Fx_imag.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 2] if coords.shape[1] > 2 else torch.zeros_like(Fx_imag)
-        dFx_dz = torch.complex(grad_Fx_dz_real, grad_Fx_dz_imag)
-        
-        grad_Fz_dx_real = torch.autograd.grad(
-            outputs=Fz_real.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 0]
-        grad_Fz_dx_imag = torch.autograd.grad(
-            outputs=Fz_imag.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 0]
-        dFz_dx = torch.complex(grad_Fz_dx_real, grad_Fz_dx_imag)
-        
-        curl_y = dFx_dz - dFz_dx
-        
-        # ∂Fy/∂x - ∂Fx/∂y for curl_z
-        grad_Fy_dx_real = torch.autograd.grad(
-            outputs=Fy_real.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 0]
-        grad_Fy_dx_imag = torch.autograd.grad(
-            outputs=Fy_imag.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 0]
-        dFy_dx = torch.complex(grad_Fy_dx_real, grad_Fy_dx_imag)
-        
-        grad_Fx_dy_real = torch.autograd.grad(
-            outputs=Fx_real.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx_real)
-        grad_Fx_dy_imag = torch.autograd.grad(
-            outputs=Fx_imag.sum(), inputs=coords,
-            create_graph=True, retain_graph=True, allow_unused=True
-        )[0][:, 1] if coords.shape[1] > 1 else torch.zeros_like(Fx_imag)
-        dFx_dy = torch.complex(grad_Fx_dy_real, grad_Fx_dy_imag)
-        
-        curl_z = dFy_dx - dFx_dy
-        
-        curl_output[:, 0, 0] = curl_x.real
-        curl_output[:, 0, 1] = curl_x.imag
-        curl_output[:, 1, 0] = curl_y.real
-        curl_output[:, 1, 1] = curl_y.imag
-        curl_output[:, 2, 0] = curl_z.real
-        curl_output[:, 2, 1] = curl_z.imag
-        
-        return curl_output
+        eps_tensor = _resolve_permittivity(epsilon, coords, E)
 
+        curl_E = self.maxwell_solver.curl_operator(E, coords)
+        curl_H = self.maxwell_solver.curl_operator(H, coords)
+        eps_E = torch.einsum("nij,nj->ni", eps_tensor, E)
 
-def _compute_divergence(field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
-    """Compute divergence using automatic differentiation."""
-    div = torch.zeros(field.shape[0], 1, device=field.device, dtype=torch.complex64) # Ensure div is complex
-    
-    for i in range(min(3, field.shape[1])): # Iterate over field components, not coords
-        if i < field.shape[1]:  # Make sure field has this component
-            field_real = field[:, i, 0] # Extract real part
-            field_imag = field[:, i, 1] # Extract imag part
-            
-            grad_real_output = torch.autograd.grad(
-                outputs=field_real.sum(),
-                inputs=coords,
-                create_graph=True,
-                retain_graph=True,
-                allow_unused=True
-            )[0]
-            grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field_real)
-            
-            grad_imag_output = torch.autograd.grad(
-                outputs=field_imag.sum(),
-                inputs=coords,
-                create_graph=True,
-                retain_graph=True,
-                allow_unused=True
-            )[0]
-            grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field_imag)
-            div[:, 0] += torch.complex(grad_real, grad_imag)
-    
-    return div
+        residual_E = curl_E - 1j * self.omega * self.mu0 * mu * H
+        residual_H = curl_H + 1j * self.omega * self.eps0 * eps_E
+
+        return torch.mean(residual_E.abs() ** 2) + torch.mean(residual_H.abs() ** 2)
 
 
 class MaxwellDivergenceLoss(BaseLoss):
     """
-    Maxwell divergence constraints: ∇·D = ρ and ∇·B = 0
-    
+    Divergence constraints ``∇·(εᵣE) = ρ/ε₀`` and ``∇·H = 0``.
+
     Args:
-        weight: Loss weight
+        weight: Loss weight.
     """
-    
-    def compute(self, 
-                network: nn.Module,
-                coords: torch.Tensor,
-                material_props: Optional[torch.Tensor] = None,
-                charge_density: Optional[torch.Tensor] = None,
-                **kwargs) -> torch.Tensor:
-        """Compute divergence constraint residuals."""
+
+    def compute(
+        self,
+        network: nn.Module,
+        coords: torch.Tensor,
+        epsilon: PermittivitySpec = None,
+        charge_density: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            network, coords: As for :class:`MaxwellCurlLoss`.
+            epsilon: Relative permittivity specification (``None`` = vacuum).
+            charge_density: Optional ``ρ/ε₀`` (complex or real, shape ``(N,)``).
+        """
         coords.requires_grad_(True)
-        fields = network(coords)
-        
-        E = fields[:, :3]
-        H = fields[:, 3:]
-        
-        # Compute divergences
-        div_E = _compute_divergence(E, coords)
-        div_H = _compute_divergence(H, coords)
-        
-        # Apply material properties
-        if material_props is not None:
-            eps_r = material_props[:, 1:4]
-            D = eps_r * E
-            div_D = _compute_divergence(D, coords)
-        else:
-            div_D = div_E
-        
-        # Divergence constraints
+        E, H = _evaluate(network, coords)
+        eps_tensor = _resolve_permittivity(epsilon, coords, E)
+
+        div_D = divergence_complex(torch.einsum("nij,nj->ni", eps_tensor, E), coords)
+        div_H = divergence_complex(H, coords)
+
         if charge_density is not None:
-            residual_D = div_D - charge_density
-        else:
-            residual_D = div_D  # Assume no free charges
-            
-        residual_B = div_H  # ∇·B = 0 always
-        
-        return torch.mean(residual_D**2) + torch.mean(residual_B**2)
-    
-        
+            div_D = div_D - charge_density.reshape(-1).to(div_D.dtype)
+
+        return torch.mean(div_D.abs() ** 2) + torch.mean(div_H.abs() ** 2)
+
 
 class MetamaterialConstitutiveLoss(BaseLoss):
     """
-    Enforce metamaterial constitutive relations: D = ε·E, B = μ·H
-    
-    Args:
-        metamaterial_solver: Metamaterial properties calculator
-        weight: Loss weight
+    Placeholder for a constitutive-relation loss ``D = ε·E``, ``B = μ·H``.
+
+    The current networks output only ``E`` and ``H``, so ``D`` and ``B`` are
+    defined *by* the constitutive relations and there is nothing independent to
+    penalise. This class is retained for API stability but is not exported
+    and raises when used.
     """
-    
-    def __init__(self,
-                 metamaterial_solver: Optional[MetamaterialProperties] = None,
-                 weight: float = 1.0):
+
+    def __init__(self, metamaterial_solver: Optional[MetamaterialProperties] = None, weight: float = 1.0):
         super().__init__(weight)
         self.metamaterial = metamaterial_solver
-    
-    def compute(self,
-                network: nn.Module,
-                coords: torch.Tensor,
-                frequency: float,
-                **kwargs) -> torch.Tensor:
-        """Enforce constitutive relations in metamaterial regions."""
-        fields = network(coords)
-        E = fields[:, :3]
-        H = fields[:, 3:]
-        
-        # Get material properties
-        if self.metamaterial:
-            eps_tensor = self.metamaterial.permittivity_tensor(coords)
-            # Assume non-magnetic materials (mu_r = 1)
-            mu_tensor = torch.eye(3, device=coords.device, dtype=E.dtype).unsqueeze(0).expand(coords.shape[0], -1, -1)
-        else:
-            # Fallback: assume vacuum/isotropic material
-            eps_tensor = torch.eye(3, device=coords.device, dtype=E.dtype).unsqueeze(0).expand(coords.shape[0], -1, -1)
-            mu_tensor = torch.eye(3, device=coords.device, dtype=E.dtype).unsqueeze(0).expand(coords.shape[0], -1, -1)        
-        # Apply constitutive relations
-        D_expected = torch.bmm(eps_tensor, E.unsqueeze(-1)).squeeze(-1)
-        B_expected = torch.bmm(mu_tensor, H.unsqueeze(-1)).squeeze(-1)
-        
-        # For complex metamaterials, D and B might be additional network outputs
-        # or computed from auxiliary equations
-        D_network = E  # Placeholder - modify based on network architecture
-        B_network = H  # Placeholder - modify based on network architecture
-        
-        residual_D = D_network - D_expected
-        residual_B = B_network - B_expected
-        
-        return torch.mean(torch.abs(residual_D)**2) + torch.mean(torch.abs(residual_B)**2)
+
+    def compute(self, *args, **kwargs) -> torch.Tensor:
+        raise NotImplementedError(
+            "MetamaterialConstitutiveLoss requires a network that predicts D and B "
+            "independently of E and H; no such architecture exists in this repository. "
+            "Material response is enforced through MaxwellCurlLoss/MaxwellDivergenceLoss "
+            "via the epsilon argument."
+        )
+
+
 class InterfaceBoundaryLoss(BaseLoss):
     """
-    Enforce boundary conditions at metamaterial-dielectric interfaces.
-    
+    Continuity of tangential ``E``, tangential ``H``, normal ``εᵣE`` and normal
+    ``μᵣH`` across a planar interface.
+
+    The network (or a pair of networks) is evaluated at ``interface_coords ± δ n``
+    where ``n`` is the normal of ``boundary_solver`` (pointing from medium 1 into
+    medium 2). Normal-component residuals are computed in relative units so all
+    four terms have comparable magnitude.
+
     Args:
-        boundary_solver: Boundary condition calculator
-        interface_coords: Coordinates of interface points
-        weight: Loss weight
+        boundary_solver: :class:`BoundaryConditions` defining the normal.
+        eps_medium_1, eps_medium_2: Permittivity of each side (see
+            :class:`MaxwellCurlLoss` for accepted forms).
+        offset: Evaluation offset δ (m) on either side of the interface.
+        interface_coords: Optional fixed interface points used when none are
+            passed to :meth:`compute`.
+        weight: Loss weight.
     """
-    
-    def __init__(self, 
-                 boundary_solver: Optional[object] = None,
-                 interface_coords: Optional[torch.Tensor] = None,
-                 weight: float = 1.0):
+
+    def __init__(
+        self,
+        boundary_solver: Optional[BoundaryConditions] = None,
+        eps_medium_1: PermittivitySpec = None,
+        eps_medium_2: PermittivitySpec = None,
+        offset: float = 1e-9,
+        interface_coords: Optional[torch.Tensor] = None,
+        weight: float = 1.0,
+    ):
         super().__init__(weight)
         self.boundary_solver = boundary_solver or BoundaryConditions()
+        self.eps_1 = eps_medium_1
+        self.eps_2 = eps_medium_2
+        self.offset = offset
         self.interface_coords = interface_coords
-    
-    def compute(self, 
-                network: nn.Module,
-                coords: torch.Tensor,
-                **kwargs) -> torch.Tensor:
-        """Enforce interface boundary conditions."""
-        if self.interface_coords is None:
-            return torch.tensor(0.0, device=coords.device)
-        
-        # Evaluate fields at interface
-        fields_interface = network(self.interface_coords)
-        E_interface = fields_interface[:, :3]
-        H_interface = fields_interface[:, 3:]
-        
-        # Get interface normal vectors and material properties
-        if hasattr(self.boundary_solver, 'get_interface_conditions'):
-            residuals = self.boundary_solver.get_interface_conditions(
-                E_interface, H_interface, self.interface_coords
-            )
-        else:
-            # Simplified tangential continuity
-            residuals = torch.zeros_like(E_interface)
-        
-        return torch.mean(torch.abs(residuals)**2)
+
+    def compute(
+        self,
+        network: nn.Module,
+        interface_coords: Optional[torch.Tensor] = None,
+        network_2: Optional[nn.Module] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            network: Network for medium 1 (and medium 2 if ``network_2`` is None).
+            interface_coords: Points on the interface ``(N, D)``; defaults to the
+                constructor value.
+            network_2: Optional separate network for medium 2.
+        """
+        pts = interface_coords if interface_coords is not None else self.interface_coords
+        if pts is None:
+            raise ValueError("InterfaceBoundaryLoss needs interface_coords")
+
+        n = self.boundary_solver.interface_normal.to(pts.device, pts.dtype)[: pts.shape[1]]
+        coords_1 = pts - self.offset * n
+        coords_2 = pts + self.offset * n
+
+        E1, H1 = _evaluate(network, coords_1)
+        E2, H2 = _evaluate(network_2 or network, coords_2)
+        eps1 = _resolve_permittivity(self.eps_1, coords_1, E1)
+        eps2 = _resolve_permittivity(self.eps_2, coords_2, E2)
+
+        bc = self.boundary_solver
+        residuals = torch.cat(
+            [
+                bc.tangential_E_continuity(E1, E2),
+                bc.tangential_H_continuity(H1, H2),
+                bc.normal_D_continuity(E1, E2, eps1, eps2, relative=True),
+                bc.normal_B_continuity(H1, H2, relative=True),
+            ],
+            dim=1,
+        )
+        return torch.mean(residuals**2)
 
 
 class SPPBoundaryLoss(BaseLoss):
     """
-    Specific boundary conditions for Surface Plasmon Polaritons.
-    
+    Soft constraint that ``|E|`` decays as ``exp(−|z| / decay_length)`` away
+    from the interface at ``z = 0``.
+
     Args:
-        spp_wavevector: Expected SPP wavevector
-        decay_length: Expected decay length in z-direction
-        weight: Loss weight
+        spp_wavevector: Expected SPP wavevector (stored for reference).
+        decay_length: Expected field decay length (m).
+        weight: Loss weight.
     """
-    
-    def __init__(self, 
-                 spp_wavevector: float,
-                 decay_length: float = 1e-6,
-                 weight: float = 1.0):
+
+    def __init__(self, spp_wavevector: float, decay_length: float = 1e-6, weight: float = 1.0):
         super().__init__(weight)
         self.k_spp = spp_wavevector
         self.decay_length = decay_length
-    
-    def compute(self, 
-                network: nn.Module,
-                coords: torch.Tensor,
-                **kwargs) -> torch.Tensor:
-        """Enforce SPP boundary conditions."""
-        fields = network(coords)
-        E = fields[:, :3]
-        
-        z_coords = coords[:, 2] # Extract z-coordinates
-        
-        # E is (batch_size, 3, 2) where last dim is real/imag
-        
-        # Calculate the magnitude of each complex component: |E_x|^2 = Ex_real^2 + Ex_imag^2
-        Ex_mag_sq = E[:, 0, 0]**2 + E[:, 0, 1]**2
-        Ey_mag_sq = E[:, 1, 0]**2 + E[:, 1, 1]**2
-        Ez_mag_sq = E[:, 2, 0]**2 + E[:, 2, 1]**2
-        
-        # Total field magnitude is sqrt(|Ex|^2 + |Ey|^2 + |Ez|^2)
-        field_magnitude = torch.sqrt(Ex_mag_sq + Ey_mag_sq + Ez_mag_sq) # Shape (batch_size,)
-        
-        # Normalize by maximum field to get relative decay
-        max_field = torch.max(field_magnitude)
-        
-        # Ensure expected_decay also has shape (batch_size,)
+
+    def compute(self, network: nn.Module, coords: torch.Tensor) -> torch.Tensor:
+        E, _ = _evaluate(network, coords)
+        z_coords = coords[:, 2] if coords.shape[1] > 2 else coords[:, -1]
+
+        field_magnitude = torch.linalg.vector_norm(E, dim=1)
+        max_field = torch.max(field_magnitude).clamp_min(torch.finfo(field_magnitude.dtype).tiny)
         expected_decay = torch.exp(-torch.abs(z_coords) / self.decay_length)
-        
-        if max_field > 0:
-            normalized_field = field_magnitude / max_field
-            decay_residual = normalized_field - expected_decay
-        else:
-            decay_residual = torch.zeros_like(field_magnitude)
-        
+        decay_residual = field_magnitude / max_field - expected_decay
         return torch.mean(decay_residual**2)
 
 
 class TangentialContinuityLoss(BaseLoss):
     """
-    Enforce tangential field continuity at interfaces: n × (E2 - E1) = 0
+    Tangential continuity ``n × (E₂ − E₁) = 0`` and ``n × (H₂ − H₁) = 0`` for a
+    single network evaluated on both sides of an interface with per-point normals.
+
+    Args:
+        offset: Evaluation offset on either side (m).
+        weight: Loss weight.
     """
-    
-    def compute(self, 
-                network: nn.Module,
-                interface_coords: torch.Tensor,
-                normal_vectors: torch.Tensor,
-                **kwargs) -> torch.Tensor:
-        """Enforce tangential continuity."""
-        # Evaluate fields on both sides of interface
-        eps = 1e-6
-        coords_plus = interface_coords + eps * normal_vectors
-        coords_minus = interface_coords - eps * normal_vectors
-        
-        fields_plus = network(coords_plus)
-        fields_minus = network(coords_minus)
-        
-        E_plus = fields_plus[:, :3]
-        E_minus = fields_minus[:, :3]
-        H_plus = fields_plus[:, 3:]
-        H_minus = fields_minus[:, 3:]
-        
-        # Tangential continuity: n × (E2 - E1) = 0, n × (H2 - H1) = K_s
-        E_jump = E_plus - E_minus
-        H_jump = H_plus - H_minus
-        
-        # Cross product with normal (assuming 3D)
-        # E_jump and H_jump are (batch_size, 3, 2)
-        # normal_vectors is (batch_size, 3)
-        
-        # Cross product for real parts
-        n_cross_E_real = torch.cross(normal_vectors, E_jump[:, :, 0], dim=1)
-        n_cross_H_real = torch.cross(normal_vectors, H_jump[:, :, 0], dim=1)
-        
-        # Cross product for imaginary parts
-        n_cross_E_imag = torch.cross(normal_vectors, E_jump[:, :, 1], dim=1)
-        n_cross_H_imag = torch.cross(normal_vectors, H_jump[:, :, 1], dim=1)
-        
-        # Combine back into (batch_size, 3, 2)
-        n_cross_E = torch.stack([n_cross_E_real, n_cross_E_imag], dim=-1)
-        n_cross_H = torch.stack([n_cross_H_real, n_cross_H_imag], dim=-1)
-        
-        # For perfect conductor interface, tangential E should be zero
-        # For dielectric interface, tangential E should be continuous
-        # Loss is the magnitude squared of the complex vector
-        return torch.mean(n_cross_E[..., 0]**2 + n_cross_E[..., 1]**2) + \
-               torch.mean(n_cross_H[..., 0]**2 + n_cross_H[..., 1]**2)
+
+    def __init__(self, offset: float = 1e-6, weight: float = 1.0):
+        super().__init__(weight)
+        self.offset = offset
+
+    def compute(
+        self, network: nn.Module, interface_coords: torch.Tensor, normal_vectors: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Args:
+            interface_coords: Interface points ``(N, 3)``.
+            normal_vectors: Unit normals ``(N, 3)``.
+        """
+        E_plus, H_plus = _evaluate(network, interface_coords + self.offset * normal_vectors)
+        E_minus, H_minus = _evaluate(network, interface_coords - self.offset * normal_vectors)
+
+        n = normal_vectors.to(E_plus.dtype)
+        n_cross_E = torch.linalg.cross(n, E_plus - E_minus, dim=1)
+        n_cross_H = torch.linalg.cross(n, H_plus - H_minus, dim=1)
+        return torch.mean(n_cross_E.abs() ** 2) + torch.mean(n_cross_H.abs() ** 2)
 
 
 class PowerFlowLoss(BaseLoss):
     """
-    Power flow constraint: ∇·S = 0 (Poynting vector divergence)
+    Power conservation ``∇·S = 0`` for the time-averaged Poynting vector
+    ``S = ½ Re(E × H*)``. Exact in lossless, source-free regions; in lossy
+    media ``∇·S = −½ ωε₀ Im(εᵣ)|E|²`` and this loss should be down-weighted.
     """
-    
-    def compute(self, 
-                network: nn.Module,
-                coords: torch.Tensor,
-                **kwargs) -> torch.Tensor:
-        """Enforce power conservation."""
+
+    def compute(self, network: nn.Module, coords: torch.Tensor) -> torch.Tensor:
         coords.requires_grad_(True)
-        fields = network(coords)
-        
-        E = fields[:, :3]
-        H = fields[:, 3:]
-        
-        # Poynting vector S = E × H*
-        S = torch.cross(E, torch.conj(H), dim=1)
-        
-        # Compute divergence of Poynting vector
-        div_S = _compute_divergence(S, coords)
-        
-        # In steady state, ∇·S = 0
-        return torch.mean(torch.abs(div_S)**2)
-    
-    def _compute_divergence(self, field: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
-        """Compute divergence using automatic differentiation."""
-        div = torch.zeros(field.shape[0], 1, device=field.device, dtype=torch.complex64) # Ensure div is complex
-        
-        for i in range(min(3, field.shape[1])):
-            if i < field.shape[1]:  # Make sure field has this component
-                field_real = field[:, i, 0] # Extract real part
-                field_imag = field[:, i, 1] # Extract imag part
-                
-                grad_real_output = torch.autograd.grad(
-                    outputs=field_real.sum(),
-                    inputs=coords,
-                    create_graph=True,
-                    retain_graph=True,
-                    allow_unused=True
-                )[0]
-                grad_real = grad_real_output[:, i] if grad_real_output is not None else torch.zeros_like(field_real)
-                
-                grad_imag_output = torch.autograd.grad(
-                    outputs=field_imag.sum(),
-                    inputs=coords,
-                    create_graph=True,
-                    retain_graph=True,
-                    allow_unused=True
-                )[0]
-                grad_imag = grad_imag_output[:, i] if grad_imag_output is not None else torch.zeros_like(field_imag)
-                div[:, 0] += torch.complex(grad_real, grad_imag)
-        
-        return div
+        E, H = _evaluate(network, coords)
+        S = MaxwellEquations.poynting_vector(E, H)  # real (N, 3)
+        div_S = divergence(S, coords)
+        return torch.mean(div_S**2)
 
 
 class WaveguideLoss(BaseLoss):
     """
-    Waveguide mode constraints for guided SPP modes.
+    Guided-mode constraint: the phase of ``E_x`` advances as ``exp(iβx)`` along
+    the propagation direction, i.e. ``∂ arg(E_x)/∂x = β``.
+
+    Args:
+        propagation_direction: Coordinate index of the propagation axis.
+        weight: Loss weight.
     """
-    
-    def __init__(self, 
-                 propagation_direction: int = 0,  # x-direction
-                 weight: float = 1.0):
+
+    def __init__(self, propagation_direction: int = 0, weight: float = 1.0):
         super().__init__(weight)
         self.prop_dir = propagation_direction
-    
-    def compute(self, 
-                network: nn.Module,
-                coords: torch.Tensor,
-                beta: float,  # Propagation constant
-                **kwargs) -> torch.Tensor:
-        """Enforce guided mode behavior."""
+
+    def compute(self, network: nn.Module, coords: torch.Tensor, beta: float) -> torch.Tensor:
         coords.requires_grad_(True)
-        fields = network(coords)
-        
-        # For guided modes, expect exp(iβx) dependence
-        x_coords = coords[:, self.prop_dir]
-        
-        # Compute phase derivative
-        phase_grad = torch.autograd.grad(
-            outputs=torch.angle(fields[:, 0]).sum(),
-            inputs=coords,
-            create_graph=True,
-            retain_graph=True
-        )[0][:, self.prop_dir]
-        
-        # Expected phase gradient is β
-        phase_residual = phase_grad - beta
-        
-        return torch.mean(phase_residual**2)
+        E, _ = _evaluate(network, coords)
+        Ex = E[:, 0]
+        # d(arg E)/dx = Im(conj(E) dE/dx) / |E|^2, avoiding the branch cut of angle()
+        dEx = torch.complex(gradient(Ex.real, coords), gradient(Ex.imag, coords))[:, self.prop_dir]
+        mag_sq = Ex.abs() ** 2 + 1e-30
+        phase_grad = (Ex.conj() * dEx).imag / mag_sq
+        return torch.mean((phase_grad - beta) ** 2)
 
 
 class RadiationLoss(BaseLoss):
     """
-    Radiation boundary condition for open boundaries.
+    First-order Sommerfeld radiation condition ``∂E/∂r − ik₀E = 0`` on an
+    outer boundary, applied component-wise to the complex field.
     """
-    
-    def compute(self, 
-                network: nn.Module,
-                boundary_coords: torch.Tensor,
-                k0: float,  # Free space wavevector
-                **kwargs) -> torch.Tensor:
-        """Enforce radiation boundary conditions."""
+
+    def compute(self, network: nn.Module, boundary_coords: torch.Tensor, k0: float) -> torch.Tensor:
         boundary_coords.requires_grad_(True)
-        fields = network(boundary_coords)
-        
-        E = fields[:, :3]
-        H = fields[:, 3:]
-        
-        # Sommerfeld radiation condition
-        # ∂E/∂r - ik₀E = 0 at boundary
-        r = torch.norm(boundary_coords, dim=1, keepdim=True)
-        
-        # Radial derivative
-        radial_grad = torch.autograd.grad(
-            outputs=torch.norm(E, dim=1).sum(),
-            inputs=boundary_coords,
-            create_graph=True,
-            retain_graph=True
-        )[0]
-        
-        radial_dir = boundary_coords / (r + 1e-8)
-        radial_derivative = torch.sum(radial_grad * radial_dir, dim=1, keepdim=True)
-        
-        # Radiation condition residual
-        E_magnitude = torch.norm(E, dim=1, keepdim=True)
-        radiation_residual = radial_derivative - 1j * k0 * E_magnitude
-        
-        return torch.mean(torch.abs(radiation_residual)**2)
+        E, _ = _evaluate(network, boundary_coords)
+
+        r = torch.linalg.vector_norm(boundary_coords, dim=1, keepdim=True)
+        radial_dir = torch.where(r > 0, boundary_coords / r.clamp_min(torch.finfo(r.dtype).tiny), 0.0)
+        d = boundary_coords.shape[1]
+
+        residuals = []
+        for i in range(3):
+            grad_c = torch.complex(gradient(E[:, i].real, boundary_coords), gradient(E[:, i].imag, boundary_coords))
+            dE_dr = torch.sum(grad_c[:, :d] * radial_dir.to(grad_c.dtype), dim=1)
+            residuals.append(dE_dr - 1j * k0 * E[:, i])
+        residual = torch.stack(residuals, dim=1)
+        return torch.mean(residual.abs() ** 2)
 
 
 class EM_CompositeLoss:
     """
-    Electromagnetic composite loss combining multiple physics constraints.
-    
+    Weighted sum of electromagnetic loss components with optional adaptive
+    re-weighting.
+
+    ``compute(**kwargs)`` forwards to each sub-loss only the keyword arguments
+    its ``compute`` signature declares, so heterogeneous losses can share one
+    call. Typical keys: ``network``, ``coords``, ``interface_coords``,
+    ``normal_vectors``, ``epsilon``, ``beta``, ``boundary_coords``, ``k0``.
+
+    When ``adaptive_weights`` is True, every ``update_interval`` steps each
+    component's ``weight`` is rescaled toward the mean running loss so that no
+    single term dominates; Maxwell/curl terms receive a 1.5× and boundary terms
+    a 1.2× priority factor. The rescaled weights take effect from the next step.
+
     Args:
-        losses: Dictionary of electromagnetic loss components
-        adaptive_weights: Whether to use adaptive weighting
-        frequency_dependent: Whether to adjust weights based on frequency
+        losses: Mapping name → loss component.
+        adaptive_weights: Enable adaptive re-weighting.
+        update_interval: Steps between weight updates.
     """
-    
-    def __init__(self, 
-                 losses: Dict[str, BaseLoss],
-                 adaptive_weights: bool = True,
-                 frequency_dependent: bool = False):
+
+    def __init__(
+        self,
+        losses: Dict[str, BaseLoss],
+        adaptive_weights: bool = True,
+        update_interval: int = 50,
+        frequency_dependent: bool = False,
+    ):
         self.losses = losses
         self.adaptive_weights = adaptive_weights
+        self.update_interval = update_interval
         self.frequency_dependent = frequency_dependent
         self.step_count = 0
-        self.loss_history = {name: [] for name in losses.keys()}
-        
-        # Electromagnetic-specific parameters
-        self.field_balance_factor = 1.0  # Balance E and H field losses
-        
-        if adaptive_weights:
-            self.alpha = 0.9  # More conservative for EM problems
-            self.running_means = {name: 1.0 for name in losses.keys()}
-    
+        self.loss_history: Dict[str, list] = {name: [] for name in losses}
+        self.alpha = 0.9
+        self.running_means = {name: 1.0 for name in losses}
+        self._signatures = {name: inspect.signature(fn.compute) for name, fn in losses.items()}
+
+    def _select_kwargs(self, name: str, kwargs: dict) -> dict:
+        sig = self._signatures[name]
+        params = sig.parameters
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return kwargs
+        selected = {k: v for k, v in kwargs.items() if k in params}
+        missing = [
+            k
+            for k, p in params.items()
+            if p.default is inspect.Parameter.empty
+            and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+            and k not in selected
+        ]
+        if missing:
+            raise TypeError(f"Loss '{name}' requires keyword argument(s) {missing} not supplied to compute()")
+        return selected
+
     def compute(self, **kwargs) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """Compute electromagnetic composite loss."""
-        loss_dict = {}
-        total_loss = 0.0
-        
-        # Separate field and physics losses for better balancing
-        field_losses = []
-        physics_losses = []
-        
+        """Return ``(total_loss, {name: weighted component loss})``."""
+        loss_dict: Dict[str, torch.Tensor] = {}
         for name, loss_fn in self.losses.items():
-            component_loss = loss_fn(**kwargs)
+            component_loss = loss_fn(**self._select_kwargs(name, kwargs))
             loss_dict[name] = component_loss
-            print(f"DEBUG: {name} component_loss dtype: {component_loss.dtype}, value: {component_loss.item()}")
-            
-            if 'curl' in name.lower() or 'divergence' in name.lower():
-                physics_losses.append(component_loss)
-            else:
-                field_losses.append(component_loss)
-            
-            self.loss_history[name].append(component_loss.item())
-        
-        # Balance field and physics contributions
-        if field_losses and physics_losses:
-            field_total = sum(field_losses)
-            physics_total = sum(physics_losses)
-            
-            # Adaptive balancing
-            if physics_total > 0:
-                balance_factor = field_total / (physics_total + 1e-8)
-                physics_total *= min(balance_factor, 10.0)  # Cap the scaling
-        
+            self.loss_history[name].append(float(component_loss.detach()))
+            logger.debug("loss %s = %.4e", name, self.loss_history[name][-1])
+
         total_loss = sum(loss_dict.values())
-        
-        # Update adaptive weights
-        if self.adaptive_weights and self.step_count % 50 == 0:
+
+        if self.adaptive_weights and self.step_count % self.update_interval == 0:
             self._update_adaptive_weights()
-        
+
         self.step_count += 1
         return total_loss, loss_dict
-    
-    def _update_adaptive_weights(self):
-        """Update weights with electromagnetic-specific considerations."""
-        # Similar to base class but with EM-specific adjustments
-        for name in self.losses.keys():
+
+    def _update_adaptive_weights(self) -> None:
+        for name in self.losses:
             if self.loss_history[name]:
-                recent_loss = np.mean(self.loss_history[name][-10:])
-                self.running_means[name] = (
-                    self.alpha * self.running_means[name] + 
-                    (1 - self.alpha) * recent_loss
-                )
-        
-        # Adjust weights to maintain physics-data balance
-        mean_loss = np.mean(list(self.running_means.values()))
-        
+                recent = float(np.mean(self.loss_history[name][-10:]))
+                self.running_means[name] = self.alpha * self.running_means[name] + (1 - self.alpha) * recent
+
+        mean_loss = float(np.mean(list(self.running_means.values())))
         for name, loss_fn in self.losses.items():
             if self.running_means[name] > 0:
-                base_weight = mean_loss / self.running_means[name]
-                
-                # Give higher priority to Maxwell equations
-                if 'maxwell' in name.lower() or 'curl' in name.lower():
-                    base_weight *= 1.5
-                elif 'boundary' in name.lower():
-                    base_weight *= 1.2
-                
-                loss_fn.weight = base_weight
-    
+                weight = mean_loss / self.running_means[name]
+                lname = name.lower()
+                if "maxwell" in lname or "curl" in lname:
+                    weight *= 1.5
+                elif "boundary" in lname:
+                    weight *= 1.2
+                loss_fn.weight = weight
+
     def get_physics_residuals(self) -> Dict[str, float]:
-        """Get physics residuals for monitoring."""
-        residuals = {}
-        for name, history in self.loss_history.items():
-            if history:
-                residuals[name] = history[-1]
-        return residuals
+        """Most recent value of each component."""
+        return {name: hist[-1] for name, hist in self.loss_history.items() if hist}

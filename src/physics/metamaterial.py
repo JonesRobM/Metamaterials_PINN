@@ -1,253 +1,348 @@
 """
 Metamaterial constitutive relations for anisotropic SPP modelling.
 
-Implements permittivity tensors for uniaxial metamaterials and provides
-analytical dispersion relations for validation.
+Implements the permittivity tensor of a uniaxial (non-magnetic) metamaterial
+and the analytical TM surface-plasmon-polariton dispersion at a planar
+interface with an isotropic dielectric, for validation of PINN solutions.
+
+Sign convention: time dependence ``exp(-iωt)`` (see
+:mod:`src.physics.maxwell_equations`). Lossy media therefore have ``Im(ε) > 0``
+and a surface wave propagating in ``+x`` and decaying with distance has
+``Im(k_spp) > 0``.
+
+Geometry used by the SPP methods
+--------------------------------
+* Interface plane ``z = 0``; metamaterial occupies ``z < 0``, isotropic
+  dielectric ``ε_d`` occupies ``z > 0``.
+* The SPP is TM polarised and propagates along ``propagation_direction``
+  (``'x'`` by default), which must lie in the interface plane.
+
+For a diagonal permittivity ``diag(ε_xx, ε_yy, ε_zz)`` with the field
+``H = (0, H_y, 0) exp(i k x)`` the extraordinary-wave dispersion in the
+anisotropic medium is ``k²/ε_zz + k_z²/ε_xx = k₀²``. Matching ``H_y`` and
+``E_x`` at ``z = 0`` gives (see e.g. Elser, Podolskiy et al., *Appl. Phys.
+Lett.* 89, 261102 (2006); Yermakov et al., *Phys. Rev. B* 91, 235423 (2015))
+
+    k_spp² = k₀² ε_d ε_n (ε_t − ε_d) / (ε_t ε_n − ε_d²)
+
+where ``ε_t`` is the metamaterial permittivity along the propagation direction
+and ``ε_n`` the component normal to the interface. Setting ``ε_t = ε_n = ε_m``
+recovers the isotropic result ``k_spp² = k₀² ε_d ε_m / (ε_d + ε_m)``. The
+decay constants are
+
+    κ_d² = k_spp² − ε_d k₀²          (dielectric side)
+    κ_m² = ε_t (k_spp² / ε_n − k₀²)  (metamaterial side)
+
+and the unsquared boundary condition is ``κ_d / ε_d + κ_m / ε_t = 0``.
 """
 
+from __future__ import annotations
+
+import cmath
+import math
+from typing import Optional, Tuple
+
 import torch
-import numpy as np
-from typing import Tuple, Optional, Union
+
+from ..constants import C0, EPS0
+
+__all__ = ["MetamaterialProperties"]
+
+_AXES = ("x", "y", "z")
+
+
+def _decaying_root(z2: complex) -> complex:
+    """Square root with ``Re > 0`` (evanescent decay away from the interface)."""
+    r = cmath.sqrt(z2)
+    if r.real < 0 or (r.real == 0 and r.imag < 0):
+        r = -r
+    return r
+
+
+def _propagating_root(z2: complex) -> complex:
+    """
+    Square root branch for a wavevector under the ``exp(-iωt)`` convention:
+    ``Im > 0`` (decaying along propagation); for a real argument choose ``Re > 0``.
+    """
+    r = cmath.sqrt(z2)
+    if r.imag < 0 or (r.imag == 0 and r.real < 0):
+        r = -r
+    return r
 
 
 class MetamaterialProperties:
     """
-    Uniaxial metamaterial with anisotropic permittivity tensor.
-    
-    For a uniaxial metamaterial with optical axis along z:
-    εᵣ = diag(ε_⊥, ε_⊥, ε_∥)
-    
-    Where ε_⊥ and ε_∥ are the perpendicular and parallel permittivity components.
+    Uniaxial, non-magnetic metamaterial with permittivity ``diag(ε_⊥, ε_⊥, ε_∥)``
+    (optical axis along ``optical_axis``).
+
+    Args:
+        eps_parallel: Relative permittivity parallel to the optical axis (ε_∥).
+        eps_perpendicular: Relative permittivity perpendicular to the optical axis (ε_⊥).
+        optical_axis: ``'x'``, ``'y'`` or ``'z'``.
+        eps0: Vacuum permittivity (F/m).
+        omega: Optional design angular frequency (rad/s). When given, ``k0`` and
+            ``omega`` are available as attributes and may be omitted from method calls.
+        wavelength: Alternative to ``omega``: free-space wavelength (m).
     """
-    
-    def __init__(self, eps_parallel: complex, eps_perpendicular: complex, 
-                 optical_axis: str = 'z', eps0: float = 8.854e-12):
-        """
-        Initialise metamaterial properties.
-        
-        Args:
-            eps_parallel: Relative permittivity parallel to optical axis
-            eps_perpendicular: Relative permittivity perpendicular to optical axis
-            optical_axis: Direction of optical axis ('x', 'y', or 'z')
-            eps0: Permittivity of free space (F/m)
-        """
-        self.eps_par = eps_parallel
-        self.eps_perp = eps_perpendicular
+
+    def __init__(
+        self,
+        eps_parallel: complex,
+        eps_perpendicular: complex,
+        optical_axis: str = "z",
+        eps0: float = EPS0,
+        omega: Optional[float] = None,
+        wavelength: Optional[float] = None,
+    ):
+        self.eps_par = complex(eps_parallel)
+        self.eps_perp = complex(eps_perpendicular)
         self.optical_axis = optical_axis.lower()
         self.eps0 = eps0
-        
-        if self.optical_axis not in ['x', 'y', 'z']:
+
+        if self.optical_axis not in _AXES:
             raise ValueError("Optical axis must be 'x', 'y', or 'z'")
-    
+        if omega is not None and wavelength is not None:
+            raise ValueError("Specify either omega or wavelength, not both")
+
+        if wavelength is not None:
+            omega = 2.0 * math.pi * C0 / wavelength
+        self.omega: Optional[float] = float(omega) if omega is not None else None
+
+    # ------------------------------------------------------------------ frequency helpers
+    @property
+    def k0(self) -> Optional[float]:
+        """Free-space wavenumber ω/c for the design frequency, or ``None``."""
+        return None if self.omega is None else self.omega / C0
+
+    def _resolve_k0(self, omega: Optional[float] = None, k0: Optional[float] = None) -> float:
+        if k0 is not None:
+            return float(k0)
+        if omega is not None:
+            return float(omega) / C0
+        if self.k0 is None:
+            raise ValueError(
+                "No frequency available: pass omega (or k0) to the method, or set omega/"
+                "wavelength in the constructor."
+            )
+        return self.k0
+
+    # ------------------------------------------------------------------ tensors
+    def eps_along(self, axis: str) -> complex:
+        """Diagonal permittivity component along a Cartesian axis."""
+        axis = axis.lower()
+        if axis not in _AXES:
+            raise ValueError("axis must be 'x', 'y', or 'z'")
+        return self.eps_par if axis == self.optical_axis else self.eps_perp
+
     def permittivity_tensor(self, coords: torch.Tensor) -> torch.Tensor:
         """
-        Return anisotropic permittivity tensor at given coordinates.
-        
-        For uniaxial metamaterial with optical axis along z:
-        εᵣ = [[ε_⊥, 0, 0],
-              [0, ε_⊥, 0],
-              [0, 0, ε_∥]]
-        
+        Relative permittivity tensor at each coordinate (homogeneous medium).
+
         Args:
-            coords: Coordinates [x, y, z] of shape (N, 3)
-            
+            coords: Coordinates, shape ``(N, D)``.
+
         Returns:
-            Permittivity tensor of shape (N, 3, 3)
+            Complex tensor of shape ``(N, 3, 3)``.
         """
-        batch_size = coords.shape[0]
-        device = coords.device
-        dtype = torch.complex64 if coords.dtype == torch.float32 else torch.complex128
-        
-        # Create identity tensor
-        eps_tensor = torch.zeros(batch_size, 3, 3, device=device, dtype=dtype)
-        
-        # Fill diagonal elements based on optical axis
-        if self.optical_axis == 'z':
-            eps_tensor[:, 0, 0] = self.eps_perp  # εxx
-            eps_tensor[:, 1, 1] = self.eps_perp  # εyy
-            eps_tensor[:, 2, 2] = self.eps_par   # εzz
-        elif self.optical_axis == 'y':
-            eps_tensor[:, 0, 0] = self.eps_perp  # εxx
-            eps_tensor[:, 1, 1] = self.eps_par   # εyy
-            eps_tensor[:, 2, 2] = self.eps_perp  # εzz
-        else:  # optical_axis == 'x'
-            eps_tensor[:, 0, 0] = self.eps_par   # εxx
-            eps_tensor[:, 1, 1] = self.eps_perp  # εyy
-            eps_tensor[:, 2, 2] = self.eps_perp  # εzz
-            
-        return eps_tensor
-    
-    def effective_permittivity(self, kx: torch.Tensor, ky: torch.Tensor) -> torch.Tensor:
+        dtype = torch.complex128 if coords.dtype == torch.float64 else torch.complex64
+        diag = torch.tensor(
+            [self.eps_along(a) for a in _AXES], dtype=dtype, device=coords.device
+        )
+        return torch.diag_embed(diag).unsqueeze(0).expand(coords.shape[0], -1, -1)
+
+    def effective_permittivity(
+        self,
+        kx: torch.Tensor,
+        ky: torch.Tensor,
+        k0: Optional[float] = None,
+        omega: Optional[float] = None,
+    ) -> torch.Tensor:
         """
-        Compute effective permittivity for SPP modes.
-        
-        For surface waves at z=0 interface with optical axis along z:
-        ε_eff = ε_⊥ * ε_∥ / (ε_⊥ - (k_∥²/k₀²) * (ε_⊥ - ε_∥))
-        
-        Where k_∥² = kx² + ky²
-        
+        Effective permittivity seen by a TM wave with in-plane wavevector ``(kx, ky)``.
+
+        The extraordinary-wave dispersion is ``k_∥²/ε_n + k_z²/ε_t = k₀²`` where
+        ``ε_t`` (``ε_n``) is the permittivity component transverse (normal) to the
+        interface at ``z = 0``. Defining the effective permittivity through the
+        isotropic-looking relation ``k_z² = ε_eff k₀² − k_∥²`` gives
+
+            ε_eff = ε_t + (k_∥²/k₀²)(1 − ε_t/ε_n).
+
+        With the optical axis normal to the interface (``'z'``) ``ε_t = ε_⊥``,
+        ``ε_n = ε_∥``. With an in-plane optical axis ``ε_t`` depends on the
+        direction of ``k_∥``: ``ε_t = (ε_xx kx² + ε_yy ky²) / k_∥²``.
+
         Args:
-            kx: x-component of wavevector
-            ky: y-component of wavevector
-            
+            kx, ky: In-plane wavevector components (same shape).
+            k0: Free-space wavenumber. Falls back to ``omega`` or the constructor value.
+            omega: Angular frequency, alternative to ``k0``.
+
         Returns:
-            Effective permittivity
+            Complex tensor ``ε_eff`` broadcast to the shape of ``kx``.
         """
-        k_parallel_sq = kx**2 + ky**2
-        
-        if self.optical_axis == 'z':
-            # Standard uniaxial case
-            denominator = self.eps_perp - (k_parallel_sq / self.k0**2) * (self.eps_perp - self.eps_par)
-            eps_eff = self.eps_perp * self.eps_par / denominator
+        k0_val = self._resolve_k0(omega, k0)
+        k_par_sq = kx**2 + ky**2
+        eps_n = self.eps_along("z")
+
+        if self.optical_axis == "z":
+            eps_t = self.eps_perp
         else:
-            # For optical axis not along z, use general formula
-            eps_eff = self.eps_perp  # Simplified for demonstration
-            
-        return eps_eff
-    
-    def spp_dispersion_relation(self, omega: float, eps_dielectric: complex = 1.0) -> Tuple[torch.Tensor, torch.Tensor]:
+            # Transverse component along the direction of k_∥.
+            eps_x, eps_y = self.eps_along("x"), self.eps_along("y")
+            zero = k_par_sq == 0
+            safe = torch.where(zero, torch.ones_like(k_par_sq), k_par_sq)
+            eps_t = (eps_x * kx**2 + eps_y * ky**2) / safe
+            eps_t = torch.where(zero, torch.full_like(eps_t, eps_x), eps_t)
+
+        return eps_t + (k_par_sq / k0_val**2) * (1.0 - eps_t / eps_n)
+
+    # ------------------------------------------------------------------ SPP dispersion
+    def _spp_components(self, propagation_direction: str) -> Tuple[complex, complex]:
+        """Return ``(ε_t, ε_n)`` for an SPP propagating along ``propagation_direction``."""
+        pd = propagation_direction.lower()
+        if pd not in ("x", "y"):
+            raise ValueError("propagation_direction must lie in the interface plane ('x' or 'y')")
+        return self.eps_along(pd), self.eps_along("z")
+
+    def spp_wavevector(
+        self,
+        omega: Optional[float] = None,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+        k0: Optional[float] = None,
+    ) -> complex:
         """
-        Analytical SPP dispersion relation for metamaterial-dielectric interface.
-        
-        For interface at z=0 with metamaterial (z<0) and dielectric (z>0):
-        k_spp = k₀ * sqrt(ε_eff * ε_d / (ε_eff + ε_d))
-        
+        Complex SPP wavevector ``k_spp`` (1/m) with ``Im(k_spp) >= 0``.
+
+        See module docstring for the formula. The branch of the square root is
+        chosen explicitly so the wave decays along its propagation direction
+        under the ``exp(-iωt)`` convention.
+        """
+        k0_val = self._resolve_k0(omega, k0)
+        eps_t, eps_n = self._spp_components(propagation_direction)
+        eps_d = complex(eps_dielectric)
+        denom = eps_t * eps_n - eps_d**2
+        if denom == 0:
+            raise ZeroDivisionError("SPP dispersion is singular: ε_t ε_n = ε_d²")
+        k_sq = k0_val**2 * eps_d * eps_n * (eps_t - eps_d) / denom
+        return _propagating_root(k_sq)
+
+    def spp_dispersion_relation(
+        self,
+        omega: Optional[float] = None,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+    ) -> Tuple[float, float]:
+        """
+        ``(Re k_spp, Im k_spp)`` at angular frequency ``omega``.
+
         Args:
-            omega: Angular frequency (rad/s)
-            eps_dielectric: Relative permittivity of upper dielectric
-            
-        Returns:
-            Tuple of (k_spp_real, k_spp_imag) for SPP wavevector
+            omega: Angular frequency (rad/s); defaults to the constructor value.
+            eps_dielectric: Relative permittivity of the dielectric half-space.
+            propagation_direction: In-plane propagation axis (``'x'`` or ``'y'``).
         """
-        k0 = omega / (3e8)  # Free space wavevector
-        
-        # For uniaxial metamaterial with optical axis along z
-        if self.optical_axis == 'z':
-            eps_eff = self.eps_perp  # For SPP modes, use perpendicular component
-        else:
-            eps_eff = self.eps_perp
-            
-        # SPP dispersion relation
-        numerator = eps_eff * eps_dielectric
-        denominator = eps_eff + eps_dielectric
-        
-        k_spp_complex = k0 * (numerator / denominator)**0.5
-        
-        return k_spp_complex.real, k_spp_complex.imag
-    
-    def propagation_length(self, omega: float, eps_dielectric: complex = 1.0) -> float:
+        k = self.spp_wavevector(omega, eps_dielectric, propagation_direction)
+        return k.real, k.imag
+
+    def _decay_constants(
+        self, omega: Optional[float], eps_dielectric: complex, propagation_direction: str
+    ) -> Tuple[complex, complex, complex]:
+        """Return ``(k_spp, κ_d, κ_m)`` with ``Re κ > 0`` (bound-mode branch)."""
+        k0_val = self._resolve_k0(omega)
+        eps_t, eps_n = self._spp_components(propagation_direction)
+        eps_d = complex(eps_dielectric)
+        k = self.spp_wavevector(omega, eps_d, propagation_direction)
+        kappa_d = _decaying_root(k**2 - eps_d * k0_val**2)
+        kappa_m = _decaying_root(eps_t * (k**2 / eps_n - k0_val**2))
+        return k, kappa_d, kappa_m
+
+    def propagation_length(
+        self,
+        omega: Optional[float] = None,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+    ) -> float:
+        """SPP intensity propagation length ``L = 1 / (2 Im k_spp)`` (m)."""
+        _, k_imag = self.spp_dispersion_relation(omega, eps_dielectric, propagation_direction)
+        return 1.0 / (2.0 * k_imag) if k_imag > 0 else float("inf")
+
+    def penetration_depth_metamaterial(
+        self,
+        omega: Optional[float] = None,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+    ) -> float:
+        """Field penetration depth ``1 / Re κ_m`` into the metamaterial (m)."""
+        _, _, kappa_m = self._decay_constants(omega, eps_dielectric, propagation_direction)
+        return 1.0 / kappa_m.real if kappa_m.real > 0 else float("inf")
+
+    def penetration_depth_dielectric(
+        self,
+        omega: Optional[float] = None,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+    ) -> float:
+        """Field penetration depth ``1 / Re κ_d`` into the dielectric (m)."""
+        _, kappa_d, _ = self._decay_constants(omega, eps_dielectric, propagation_direction)
+        return 1.0 / kappa_d.real if kappa_d.real > 0 else float("inf")
+
+    def field_enhancement_factor(
+        self,
+        omega: Optional[float] = None,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+    ) -> float:
         """
-        Calculate SPP propagation length L_spp = 1/(2*Im(k_spp))
-        
-        Args:
-            omega: Angular frequency (rad/s)
-            eps_dielectric: Relative permittivity of upper dielectric
-            
-        Returns:
-            Propagation length in metres
+        Ratio of normal to tangential electric-field amplitude at the interface
+        on the dielectric side, ``|E_z| / |E_x| = |k_spp| / |κ_d|``.
+
+        For an isotropic metal this is ``sqrt(|ε_m| / ε_d)`` (Maier, *Plasmonics*,
+        Sec. 2.2), a measure of how strongly the SPP field is concentrated
+        normal to the surface. It is a property of the mode alone and is not
+        the excitation-dependent enhancement of a Kretschmann/grating coupler.
         """
-        _, k_spp_imag = self.spp_dispersion_relation(omega, eps_dielectric)
-        
-        if k_spp_imag > 0:
-            return 1.0 / (2.0 * k_spp_imag)
-        else:
-            return float('inf')  # No damping
-    
-    def penetration_depth_metamaterial(self, omega: float, eps_dielectric: complex = 1.0) -> float:
+        k, kappa_d, _ = self._decay_constants(omega, eps_dielectric, propagation_direction)
+        if abs(kappa_d) == 0:
+            return float("inf")
+        return abs(k) / abs(kappa_d)
+
+    def is_spp_supported(
+        self,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+        rel_tol: float = 1e-6,
+        bound_tol: float = 1e-3,
+    ) -> bool:
         """
-        Calculate SPP penetration depth into metamaterial.
-        
-        Args:
-            omega: Angular frequency (rad/s)
-            eps_dielectric: Relative permittivity of upper dielectric
-            
-        Returns:
-            Penetration depth in metres
+        Whether a bound TM surface mode exists at the interface.
+
+        The condition is checked in full (frequency independent, since ``k₀``
+        scales out): with ``κ_d, κ_m`` on the ``Re > 0`` branch the unsquared
+        matching condition ``κ_d/ε_d + κ_m/ε_t = 0`` must hold (squaring can
+        introduce spurious roots) and both decay constants must have positive
+        real part (``Re κ > bound_tol·|κ|``) so the mode is bound on both
+        sides. For lossless media this
+        reduces to ``ε_t < 0``, ``k_spp² > ε_d k₀²`` and ``κ_m² > 0``.
         """
-        k0 = omega / (3e8)
-        k_spp_real, _ = self.spp_dispersion_relation(omega, eps_dielectric)
-        
-        # z-component of wavevector in metamaterial
-        if self.optical_axis == 'z':
-            eps_eff = self.eps_par  # Use parallel component for z-direction
-        else:
-            eps_eff = self.eps_perp
-            
-        kz_sq = eps_eff * k0**2 - k_spp_real**2
-        
-        if kz_sq.real < 0:  # Evanescent wave
-            kz_imag = (-kz_sq)**0.5
-            return 1.0 / kz_imag.real
-        else:
-            return float('inf')  # Propagating wave
-    
-    def penetration_depth_dielectric(self, omega: float, eps_dielectric: complex = 1.0) -> float:
-        """
-        Calculate SPP penetration depth into dielectric.
-        
-        Args:
-            omega: Angular frequency (rad/s)
-            eps_dielectric: Relative permittivity of upper dielectric
-            
-        Returns:
-            Penetration depth in metres
-        """
-        k0 = omega / (3e8)
-        k_spp_real, _ = self.spp_dispersion_relation(omega, eps_dielectric)
-        
-        # z-component of wavevector in dielectric
-        kz_sq = eps_dielectric * k0**2 - k_spp_real**2
-        
-        if kz_sq.real < 0:  # Evanescent wave
-            kz_imag = ((-kz_sq)**0.5).real
-            return 1.0 / kz_imag
-        else:
-            return float('inf')  # Propagating wave
-    
-    def field_enhancement_factor(self, omega: float, eps_dielectric: complex = 1.0) -> float:
-        """
-        Calculate electric field enhancement at the interface.
-        
-        Args:
-            omega: Angular frequency (rad/s)
-            eps_dielectric: Relative permittivity of upper dielectric
-            
-        Returns:
-            Field enhancement factor |E_surface|/|E_incident|
-        """
-        # Simplified enhancement factor for SPP excitation
-        if self.optical_axis == 'z':
-            eps_eff = self.eps_perp
-        else:
-            eps_eff = self.eps_perp
-            
-        # Field enhancement proportional to 1/|ε_eff + ε_d|
-        enhancement = 1.0 / abs(eps_eff + eps_dielectric)
-        
-        return enhancement.real
-    
-    def is_spp_supported(self, eps_dielectric: complex = 1.0) -> bool:
-        """
-        Check if SPP modes are supported at the interface.
-        
-        SPPs exist when Re(ε_eff) < 0 and Re(ε_d) > 0, and
-        Re(ε_eff + ε_d) < 0
-        
-        Args:
-            eps_dielectric: Relative permittivity of upper dielectric
-            
-        Returns:
-            True if SPP modes are supported
-        """
-        if self.optical_axis == 'z':
-            eps_eff = self.eps_perp
-        else:
-            eps_eff = self.eps_perp
-            
-        condition1 = eps_eff.real * eps_dielectric.real < 0
-        
-        return condition1
-    
+        eps_t, eps_n = self._spp_components(propagation_direction)
+        eps_d = complex(eps_dielectric)
+        denom = eps_t * eps_n - eps_d**2
+        if denom == 0:
+            return False
+        n_sq = eps_d * eps_n * (eps_t - eps_d) / denom  # (k_spp / k0)^2
+        kappa_d = _decaying_root(n_sq - eps_d)
+        kappa_m = _decaying_root(eps_t * (n_sq / eps_n - 1.0))
+        # Both decay constants must be *meaningfully* real-positive. Near a
+        # radiative (k_spp < sqrt(ε_d) k0) configuration a small loss term makes
+        # Re κ tiny but positive; that is an oscillatory, not a bound, field.
+        for kappa in (kappa_d, kappa_m):
+            if kappa.real <= bound_tol * abs(kappa):
+                return False
+        matching = kappa_d / eps_d + kappa_m / eps_t
+        scale = abs(kappa_d / eps_d) + abs(kappa_m / eps_t)
+        return abs(matching) <= rel_tol * scale
+
     def __repr__(self) -> str:
-        return (f"MetamaterialProperties(eps_∥={self.eps_par}, "
-                f"eps_⊥={self.eps_perp}, optical_axis={self.optical_axis})")
+        return (
+            f"MetamaterialProperties(eps_∥={self.eps_par}, eps_⊥={self.eps_perp}, "
+            f"optical_axis={self.optical_axis}, omega={self.omega})"
+        )
