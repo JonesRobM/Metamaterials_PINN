@@ -253,10 +253,11 @@ def test_validation_failure_does_not_cache(tmp_path):
 def test_load_raw_spp_config_is_flat_and_unprocessed(manager):
     raw = manager.load_raw("spp_config")
 
-    # PyYAML 1.1 leaves "4.74e14" as a string; load_raw does not convert it
-    # (train_spp_pinn.py wraps it in float() itself).
-    assert raw["frequency"] == "4.74e14"
-    assert float(raw["frequency"]) == pytest.approx(4.74e14)
+    # PyYAML 1.1 leaves "2.9758e15" as a string; load_raw does not convert it
+    # (train_spp_pinn.py wraps it in float() itself). The value is the ANGULAR
+    # frequency for lambda0 = 633 nm.
+    assert isinstance(raw["frequency"], str)
+    assert float(raw["frequency"]) == pytest.approx(2.9758e15)
     assert raw["metal_permittivity"] == [-19, 0.53]
     assert raw["x_range"] == [-1.0e-6, 1.0e-6]
     assert raw["training"]["num_epochs"] == 10000

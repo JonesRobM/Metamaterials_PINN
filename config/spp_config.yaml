@@ -25,7 +25,11 @@ metal_permittivity: [-19, 0.53] # Complex permittivity of Silver (real, imag)
 dielectric_permittivity: 1.0 # Permittivity of Air
 
 # --- Wave Properties ---
-frequency: 4.74e14 # Frequency corresponding to 633nm wavelength
+# ANGULAR frequency (rad/s). SPPNetwork and the loss functions take omega, not
+# a linear frequency: omega = 2*pi*c / lambda0 with lambda0 = 633 nm.
+# (An earlier value here, 4.74e14, was the linear frequency in Hz — a factor-2pi
+# error in k0.)
+frequency: 2.9758e15
 
 # --- PINN Model ---
 model:

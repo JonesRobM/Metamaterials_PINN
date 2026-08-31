@@ -24,6 +24,7 @@ from src.models.loss_functions import (  # noqa: E402
     TangentialContinuityLoss,
 )
 from src.models.pinn_network import SPPNetwork  # noqa: E402
+from src.physics.metamaterial import MetamaterialProperties  # noqa: E402
 
 DEFAULT_CONFIG = REPO_ROOT / "config" / "spp_config.yaml"
 DEFAULT_MODEL_OUT = REPO_ROOT / "artifacts" / "models" / "spp_pinn.pth"
@@ -59,15 +60,21 @@ def main(argv=None):
     num_collocation = config["training"]["num_collocation_points"]
     num_interface = config["training"]["num_interface_points"]
 
-    collocation_coords = torch.rand(num_collocation, 3, device=device)
-    collocation_coords[:, 0] = collocation_coords[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
-    collocation_coords[:, 1] = collocation_coords[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
-    collocation_coords[:, 2] = collocation_coords[:, 2] * (z_range[1] - z_range[0]) + z_range[0]
+    def sample_collocation(n: int) -> torch.Tensor:
+        c = torch.rand(n, 3, device=device)
+        c[:, 0] = c[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
+        c[:, 1] = c[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
+        c[:, 2] = c[:, 2] * (z_range[1] - z_range[0]) + z_range[0]
+        return c
 
-    interface_coords = torch.rand(num_interface, 3, device=device)
-    interface_coords[:, 0] = interface_coords[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
-    interface_coords[:, 1] = interface_coords[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
-    interface_coords[:, 2] = interface_z
+    def sample_interface(n: int) -> torch.Tensor:
+        c = torch.rand(n, 3, device=device)
+        c[:, 0] = c[:, 0] * (x_range[1] - x_range[0]) + x_range[0]
+        c[:, 1] = c[:, 1] * (y_range[1] - y_range[0]) + y_range[0]
+        c[:, 2] = interface_z
+        return c
+
+    interface_coords = sample_interface(num_interface)
 
     normal_vectors = torch.zeros_like(interface_coords)
     normal_vectors[:, 2] = 1.0
@@ -85,12 +92,25 @@ def main(argv=None):
         frequency=config["frequency"],
     ).to(device)
 
+    # Physical scales derived from the material system (not hardcoded)
+    eps_m = complex(config["metal_permittivity"][0], config["metal_permittivity"][1])
+    material = MetamaterialProperties(eps_m, eps_m, "z", omega=config["frequency"])
+    delta_d = material.penetration_depth_dielectric(
+        eps_dielectric=config["dielectric_permittivity"]
+    )
+    spp_wavelength = 2 * torch.pi / material.spp_wavevector(
+        eps_dielectric=config["dielectric_permittivity"]
+    ).real
+
     loss_fns = {
         "maxwell_curl": MaxwellCurlLoss(frequency=config["frequency"]),
-        "tangential_continuity": TangentialContinuityLoss(),
+        # Offset must sit well inside the decay length on both sides
+        "tangential_continuity": TangentialContinuityLoss(offset=min(delta_d, spp_wavelength) / 50),
         "spp_boundary": SPPBoundaryLoss(
-            spp_wavevector=spp_network.k_spp.real.item(),
-            decay_length=300e-9,  # approximate decay length for Ag/Air at 633 nm
+            spp_wavevector=material.spp_wavevector(
+                eps_dielectric=config["dielectric_permittivity"]
+            ).real,
+            decay_length=delta_d,  # dielectric-side |E| decay (metal side is far shorter)
         ),
     }
     composite_loss = EM_CompositeLoss(losses=loss_fns, adaptive_weights=True)
@@ -98,6 +118,8 @@ def main(argv=None):
 
     for epoch in range(num_epochs):
         optimizer.zero_grad()
+        # Fresh collocation points every epoch (a fixed set lets the network overfit it)
+        collocation_coords = sample_collocation(num_collocation)
         total_loss, loss_dict = composite_loss.compute(
             network=spp_network,
             coords=collocation_coords,
