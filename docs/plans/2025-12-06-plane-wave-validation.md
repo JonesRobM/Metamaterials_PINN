@@ -1,7 +1,7 @@
 # Plane Wave Validation Experiment
 
 **Date:** 2025-12-06
-**Status:** Design Complete - Ready for Implementation
+**Status:** Implemented and run (2026-08-29) — see [2026-08-29-plane-wave-validation-results.md](2026-08-29-plane-wave-validation-results.md) for outcomes; `examples/validate_plane_wave.py` is the implementation.
 **Goal:** Validate PINN fundamentals with pure physics-informed training
 
 ## Objective

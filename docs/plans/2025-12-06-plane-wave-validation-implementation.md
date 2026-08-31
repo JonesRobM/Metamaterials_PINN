@@ -2,6 +2,8 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+**Status:** Implemented (2026-08-29). The as-built script deviates from the task list below (dimensionless training frame, soft Dirichlet boundary term, divergence loss); see [2026-08-29-plane-wave-validation-results.md](2026-08-29-plane-wave-validation-results.md).
+
 **Goal:** Create validation script that trains a PINN to discover plane wave solution using only Maxwell's equations (zero data supervision).
 
 **Architecture:** Standalone script in `examples/` directory that samples collocation points, trains ElectromagneticPINN with MaxwellCurlLoss, and validates physics accuracy through residual analysis and wave property verification.
