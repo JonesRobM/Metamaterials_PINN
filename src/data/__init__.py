@@ -1,38 +1,31 @@
 """
 Data handling module for SPP metamaterial PINN implementation.
 
-This module provides domain sampling, collocation point generation, and
-data management utilities for training Physics-Informed Neural Networks
-on electromagnetic problems.
+Provides domain and collocation-point sampling utilities for training
+Physics-Informed Neural Networks on electromagnetic problems. All samplers
+live in ``domain_sampler``; every ``DomainSampler`` can also sample the outer
+domain boundary via ``sample_domain_boundary`` and ``AdaptiveSampler`` supports
+residual-driven refinement via ``refine_around_high_residuals``.
 """
 
 from .domain_sampler import (
-    DomainSampler,
-    UniformSampler,
     AdaptiveSampler,
+    DomainSampler,
     InterfaceSampler,
+    SamplingRegion,
+    SamplingStrategy,
     SPPDomainSampler,
-    StratifiedSampler
-)
-
-from .collection_points import (
-    CollocationPointGenerator,
-    MaxwellPointGenerator,
-    BoundaryPointGenerator,
-    SPPCollocationGenerator,
-    AdaptiveCollocationManager
+    StratifiedSampler,
+    UniformSampler,
 )
 
 __all__ = [
-    'DomainSampler',
-    'UniformSampler', 
-    'AdaptiveSampler',
-    'InterfaceSampler',
-    'SPPDomainSampler',
-    'StratifiedSampler',
-    'CollocationPointGenerator',
-    'MaxwellPointGenerator',
-    'BoundaryPointGenerator', 
-    'SPPCollocationGenerator',
-    'AdaptiveCollocationManager'
+    "DomainSampler",
+    "UniformSampler",
+    "AdaptiveSampler",
+    "InterfaceSampler",
+    "SPPDomainSampler",
+    "StratifiedSampler",
+    "SamplingRegion",
+    "SamplingStrategy",
 ]
