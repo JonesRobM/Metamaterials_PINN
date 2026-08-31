@@ -209,3 +209,6 @@ artifacts/runs/
 !/figures/point_charge_electric_field.png
 !/figures/plane_wave_validation/
 !/figures/spp_validation/
+!/figures/inverse_design/
+!/figures/dispersion/
+!/figures/spp_dispersion/

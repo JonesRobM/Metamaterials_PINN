@@ -1,0 +1,308 @@
+{
+  "lambda0_nm": 633.0,
+  "eps_d": 1.0,
+  "im_eps_t": 0.2,
+  "im_eps_n": 0.05,
+  "steps": 2000,
+  "wavevector": {
+    "target_n_eff": 1.8,
+    "solutions": [
+      {
+        "eps_t": [
+          -1.3902007499532034,
+          0.2
+        ],
+        "eps_n": [
+          -1.4376325166008859,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.8,
+        "reference_n_eff": 1.8,
+        "L_um": 0.24405809298135045,
+        "reference_L_um": 0.24405809298135045,
+        "delta_d_nm": 67.0366955636274,
+        "reference_delta_d_nm": 67.0366955636274,
+        "delta_m_nm": 47.106116688083205,
+        "reference_delta_m_nm": 47.106116688083205,
+        "enhancement": 1.1895977293632807,
+        "reference_enhancement": 1.1895977293632807,
+        "init": [
+          -2.0,
+          -2.0
+        ],
+        "target_n_eff": 1.8,
+        "final_loss": 1.6605535193950299e-31
+      },
+      {
+        "eps_t": [
+          -0.15634711870378332,
+          0.2
+        ],
+        "eps_n": [
+          8.128214562098254,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.8,
+        "reference_n_eff": 1.7999999999999996,
+        "L_um": 0.12175588844548801,
+        "reference_L_um": 0.12175588844548801,
+        "delta_d_nm": 66.2995732241385,
+        "reference_delta_d_nm": 66.29957322413851,
+        "delta_m_nm": 300.2016157477188,
+        "reference_delta_m_nm": 300.20161574771873,
+        "enhancement": 1.1567789623264528,
+        "reference_enhancement": 1.156778962326453,
+        "init": [
+          -0.3,
+          8.0
+        ],
+        "target_n_eff": 1.8,
+        "final_loss": 3.1626334788046164e-29
+      }
+    ],
+    "solution_separation": 9.645093318180194,
+    "figures": {
+      "convergence": "/Users/robjones/Documents/Personal/Projects/Physics/Metamaterials_PINN/figures/inverse_design/wavevector_convergence.png",
+      "map": "/Users/robjones/Documents/Personal/Projects/Physics/Metamaterials_PINN/figures/inverse_design/wavevector_map.png"
+    }
+  },
+  "propagation": {
+    "constraint_delta_d_nm": 300.0,
+    "solution": {
+      "eps_t": [
+        -10.68950782236534,
+        0.2
+      ],
+      "eps_n": [
+        -5.410079180708103,
+        0.05
+      ],
+      "supported": true,
+      "reference_supported": true,
+      "n_eff": 1.0548680647289812,
+      "reference_n_eff": 1.054868064728981,
+      "L_um": 45.65930797886964,
+      "reference_L_um": 45.65930797886964,
+      "delta_d_nm": 300.02072854150134,
+      "reference_delta_d_nm": 300.02072854150174,
+      "delta_m_nm": 28.061423379445063,
+      "reference_delta_m_nm": 28.061423379445063,
+      "enhancement": 3.141251234615609,
+      "reference_enhancement": 3.141251234615613,
+      "bound_nm": 300.0,
+      "final_loss": 0.0011033693131482667
+    },
+    "pareto": [
+      {
+        "eps_t": [
+          -3.955425421407778,
+          0.2
+        ],
+        "eps_n": [
+          -1.842952681996354,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.2041455911687886,
+        "reference_n_eff": 1.2041455911687886,
+        "L_um": 3.7207989027153854,
+        "reference_L_um": 3.7207989027153854,
+        "delta_d_nm": 150.11962817535178,
+        "reference_delta_d_nm": 150.11962817535178,
+        "delta_m_nm": 37.8835052687112,
+        "reference_delta_m_nm": 37.8835052687112,
+        "enhancement": 1.7932290712559331,
+        "reference_enhancement": 1.7932290712559331,
+        "bound_nm": 150.0,
+        "final_loss": 0.01355718267787089
+      },
+      {
+        "eps_t": [
+          -5.64326107429756,
+          0.2
+        ],
+        "eps_n": [
+          -2.896220682412687,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.1195961240213914,
+        "reference_n_eff": 1.1195961240213914,
+        "L_um": 10.274283620203276,
+        "reference_L_um": 10.274283620203278,
+        "delta_d_nm": 200.05875301388366,
+        "reference_delta_d_nm": 200.05875301388366,
+        "delta_m_nm": 35.42373748921861,
+        "reference_delta_m_nm": 35.42373748921861,
+        "enhancement": 2.222785468035274,
+        "reference_enhancement": 2.222785468035274,
+        "bound_nm": 200.0,
+        "final_loss": 0.004905367695695786
+      },
+      {
+        "eps_t": [
+          -7.927159351943109,
+          0.2
+        ],
+        "eps_n": [
+          -4.040027993709759,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.078109712628403,
+        "reference_n_eff": 1.0781097126284032,
+        "L_um": 23.155110814666465,
+        "reference_L_um": 23.155110814666468,
+        "delta_d_nm": 250.03343879633564,
+        "reference_delta_d_nm": 250.03343879633528,
+        "delta_m_nm": 31.529874613739068,
+        "reference_delta_m_nm": 31.52987461373906,
+        "enhancement": 2.6754250045852666,
+        "reference_enhancement": 2.6754250045852626,
+        "bound_nm": 250.0,
+        "final_loss": 0.00217597610500568
+      },
+      {
+        "eps_t": [
+          -10.68950782236534,
+          0.2
+        ],
+        "eps_n": [
+          -5.410079180708103,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.0548680647289812,
+        "reference_n_eff": 1.054868064728981,
+        "L_um": 45.65930797886964,
+        "reference_L_um": 45.65930797886964,
+        "delta_d_nm": 300.02072854150134,
+        "reference_delta_d_nm": 300.02072854150174,
+        "delta_m_nm": 28.061423379445063,
+        "reference_delta_m_nm": 28.061423379445063,
+        "enhancement": 3.141251234615609,
+        "reference_enhancement": 3.141251234615613,
+        "bound_nm": 300.0,
+        "final_loss": 0.0011033693131482667
+      },
+      {
+        "eps_t": [
+          -17.583093996276496,
+          0.2
+        ],
+        "eps_n": [
+          -9.207468683071937,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.0312287268309028,
+        "reference_n_eff": 1.0312287268309028,
+        "L_um": 136.35942591636527,
+        "reference_L_um": 136.3594259163653,
+        "delta_d_nm": 399.9999372057594,
+        "reference_delta_d_nm": 399.9999372057594,
+        "delta_m_nm": 22.747567409095105,
+        "reference_delta_m_nm": 22.747567409095105,
+        "enhancement": 4.09433412355385,
+        "reference_enhancement": 4.09433412355385,
+        "bound_nm": 400.0,
+        "final_loss": 0.00036943624236163906
+      },
+      {
+        "eps_t": [
+          -26.39354533335756,
+          0.2
+        ],
+        "eps_n": [
+          -14.453805235624817,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.020104607924311,
+        "reference_n_eff": 1.0201046079243108,
+        "L_um": 323.15523990035706,
+        "reference_L_um": 323.155239900357,
+        "delta_d_nm": 499.90319142577044,
+        "reference_delta_d_nm": 499.9031914257733,
+        "delta_m_nm": 18.939795869725756,
+        "reference_delta_m_nm": 18.939795869725756,
+        "enhancement": 5.061782191486984,
+        "reference_enhancement": 5.061782191487012,
+        "bound_nm": 500.0,
+        "final_loss": 0.00015634381628355096
+      },
+      {
+        "eps_t": [
+          -37.167962463698764,
+          0.2
+        ],
+        "eps_n": [
+          -21.51323300284141,
+          0.05
+        ],
+        "supported": true,
+        "reference_supported": true,
+        "n_eff": 1.0139970079396592,
+        "reference_n_eff": 1.0139970079396592,
+        "L_um": 659.6121953890922,
+        "reference_L_um": 659.6121953890921,
+        "delta_d_nm": 600.0331342665925,
+        "reference_delta_d_nm": 600.0331342665925,
+        "delta_m_nm": 16.14358779693895,
+        "reference_delta_m_nm": 16.14358779693895,
+        "enhancement": 6.039297554372689,
+        "reference_enhancement": 6.039297554372689,
+        "bound_nm": 600.0,
+        "final_loss": 7.639907435457038e-05
+      }
+    ],
+    "figures": {
+      "convergence": "/Users/robjones/Documents/Personal/Projects/Physics/Metamaterials_PINN/figures/inverse_design/propagation_convergence.png",
+      "pareto": "/Users/robjones/Documents/Personal/Projects/Physics/Metamaterials_PINN/figures/inverse_design/propagation_pareto.png"
+    }
+  },
+  "enhancement": {
+    "target_enhancement": 2.5,
+    "solution": {
+      "eps_t": [
+        -2.6437511781625336,
+        0.2
+      ],
+      "eps_n": [
+        2.4017277698538213,
+        0.05
+      ],
+      "supported": true,
+      "reference_supported": true,
+      "n_eff": 1.0907655709528339,
+      "reference_n_eff": 1.0907655709528339,
+      "L_um": 6.968778330816659,
+      "reference_L_um": 6.968778330816659,
+      "delta_d_nm": 231.09807192879163,
+      "reference_delta_d_nm": 231.09807192879163,
+      "delta_m_nm": 87.13945561055827,
+      "reference_delta_m_nm": 87.13945561055827,
+      "enhancement": 2.4999999999999996,
+      "reference_enhancement": 2.4999999999999996,
+      "init": [
+        -2.0,
+        3.0
+      ],
+      "target_enhancement": 2.5,
+      "final_loss": 3.9727743151129e-28
+    },
+    "figures": {
+      "convergence": "/Users/robjones/Documents/Personal/Projects/Physics/Metamaterials_PINN/figures/inverse_design/enhancement_convergence.png"
+    }
+  }
+}

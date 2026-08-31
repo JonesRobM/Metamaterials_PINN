@@ -1,0 +1,72 @@
+{
+  "drude_model": {
+    "eps_inf": 3.7,
+    "hbar_omega_p_eV": 9.1,
+    "hbar_gamma_eV": 0.018
+  },
+  "silver_at_633nm": {
+    "eps_drude": [
+      -17.951691544899813,
+      0.19929080252505987
+    ],
+    "eps_johnson_christy": [
+      -18.3,
+      0.55
+    ],
+    "relative_deviation_vs_jc": 0.026997811483249753,
+    "n_eff": 1.0290690571389414,
+    "propagation_length_um": 149.74514707215977,
+    "penetration_depth_dielectric_nm": 415.4688021801431,
+    "penetration_depth_metal_nm": 23.142203154619473
+  },
+  "surface_plasmon_asymptote": {
+    "hbar_omega_sp_eV": 4.1975169965314265,
+    "wavelength_nm": 295.3750954664114
+  },
+  "silver_sweep": {
+    "wavelength_range_nm": [
+      400.0,
+      1000.0
+    ],
+    "supported_fraction": 1.0,
+    "propagation_length_um_range": [
+      21.888592351233587,
+      496.98558878182246
+    ]
+  },
+  "design_space": {
+    "lambda0_nm": 633.0,
+    "eps_d": 1.0,
+    "im_eps_t": 0.1,
+    "im_eps_n": 0.05,
+    "eps_t_re_range": [
+      -10.0,
+      2.0
+    ],
+    "eps_n_re_range": [
+      -4.0,
+      8.0
+    ],
+    "supported_fraction": 0.7372094750129947,
+    "n_eff_range": [
+      1.000432615263761,
+      3.088951451898699
+    ],
+    "propagation_length_um_range": [
+      0.017571498036145678,
+      112.03604991706321
+    ]
+  },
+  "anisotropy_cut": {
+    "eps_t": [
+      -4.0,
+      0.2
+    ],
+    "supported_fraction": 0.900497512437811,
+    "support_boundaries_re_eps_n": [
+      -0.19000000000000017,
+      1.0099999999999998
+    ]
+  },
+  "n_points": 201
+}

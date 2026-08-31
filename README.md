@@ -215,9 +215,21 @@ anchor; results in `docs/plans/`):
 - **Plane wave** — `examples/validate_plane_wave.py`: relative L2 ≈ 8e-4,
   wavelength error 9e-5, E ⊥ H confirmed.
 - **Surface plasmon (silver/air, 633 nm)** — `examples/validate_spp.py`:
-  the PINN recovers the bound SPP mode (relative L2 ≈ 0.05, k_spp to 0.06%),
-  using a displacement adapter so the physical E_z discontinuity at the
-  interface is exact by construction.
+  the PINN recovers the bound SPP mode (relative L2 ≈ 4e-3, k_spp to 0.008%,
+  decay constants < 1%), using a displacement adapter so the physical E_z
+  discontinuity at the interface is exact by construction.
+- **Anisotropic SPP (uniaxial metamaterial)** — `examples/validate_spp.py
+  --case uniaxial`: relative L2 ≈ 9e-3, k_spp to 0.016%, both decay
+  constants < 1%.
+- **Dispersion recovery (one ω-conditioned network)** — `examples/validate_spp_dispersion.py`:
+  a single frequency-conditioned PINN reproduces k_spp(ω) across a 30 %-wide
+  band (worst relative L2 0.026, k_spp to 0.15 %) instead of retraining per
+  frequency.
+- **Design space & inverse design** — `examples/dispersion_analysis.py`
+  (bound-mode existence and dispersion maps over the (ε_t, ε_n) plane) and
+  `examples/inverse_design.py` (gradient-based design through the
+  differentiable dispersion in `src/design.py`: target wavevector, maximum
+  propagation under a confinement bound, target field enhancement).
 
 ## 🛠️ Technical Details
 
