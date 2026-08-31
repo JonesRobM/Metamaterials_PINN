@@ -6,34 +6,33 @@ specifically designed for electromagnetic Physics-Informed Neural Networks.
 """
 
 from .metrics import (
-    MaxwellResidualMetrics,
-    SPPPhysicsMetrics,
     BoundaryConditionMetrics,
-    FieldAccuracyMetrics,
     EnergyConservationMetrics,
+    FieldAccuracyMetrics,
+    MaxwellResidualMetrics,
+    MetricsCollector,
+    SPPPhysicsMetrics,
     TrainingMetrics,
-    MetricsCollector
 )
-
 from .plotting import (
-    EMFieldPlotter,
-    TrainingPlotter,
-    SPPAnalysisPlotter,
     ComplexFieldVisualizer,
     DispersionPlotter,
-    InteractivePlotter
+    EMFieldPlotter,
+    InteractivePlotter,
+    SPPAnalysisPlotter,
+    TrainingPlotter,
 )
 
 __all__ = [
     # Metrics
     'MaxwellResidualMetrics',
-    'SPPPhysicsMetrics', 
+    'SPPPhysicsMetrics',
     'BoundaryConditionMetrics',
     'FieldAccuracyMetrics',
     'EnergyConservationMetrics',
     'TrainingMetrics',
     'MetricsCollector',
-    
+
     # Plotting
     'EMFieldPlotter',
     'TrainingPlotter',
