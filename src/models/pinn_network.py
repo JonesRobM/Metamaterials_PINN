@@ -385,14 +385,24 @@ class SPPNetwork(ElectromagneticPINN):
     Sign convention ``exp(-iωt)``: the SPP wavevector is chosen with
     ``Im(k_spp) > 0`` so the mode decays along its propagation direction.
 
+    Units contract: ``interface_position`` and ``decay_length`` must be expressed
+    in the SAME units as the coordinates passed to ``forward``. With raw SI
+    coordinates that is metres; when the network is driven with scaled
+    coordinates (e.g. wrapped in :class:`NondimensionalPINN`, which feeds the
+    core coords/length_scale), pass both in those scaled units and set
+    ``coord_scale`` accordingly so the internal MLPs also see O(1) inputs.
+
     Args:
         interface_position: z-coordinate of metal-dielectric interface
+            (units of the input coordinates)
         metal_permittivity: Complex permittivity of metal (``Im > 0`` for loss)
         dielectric_permittivity: Permittivity of dielectric
         frequency: Operating angular frequency (rad/s)
         spatial_dim: Spatial dimension
-        decay_length: Envelope decay length (m) imposed away from the interface
-        **kwargs: Additional arguments for ElectromagneticPINN
+        decay_length: Envelope decay length imposed away from the interface
+            (units of the input coordinates)
+        **kwargs: Additional arguments for ElectromagneticPINN (notably
+            ``coord_scale`` and ``fourier_k_range``)
     """
 
     def __init__(self,
@@ -448,8 +458,8 @@ class SPPNetwork(ElectromagneticPINN):
         # Base electromagnetic network
         base_fields = super().forward(coords)
 
-        # SPP-specific modulation
-        spp_mod = self.spp_modulation(coords)
+        # SPP-specific modulation (scaled coords so the tanh MLP sees O(1) inputs)
+        spp_mod = self.spp_modulation(coords / self.coord_scale)
 
         # Distance from the interface
         z_coords = coords[:, 2] if coords.shape[1] > 2 else coords[:, 1]

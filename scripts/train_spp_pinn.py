@@ -1,5 +1,13 @@
 """Train the SPPNetwork on a metal/dielectric interface using the composite EM loss.
 
+Lightweight demo. The rigorous, validated SPP experiment (dimensionless frame,
+displacement adapter, Adam + L-BFGS, full metrics against the analytical mode)
+is ``examples/validate_spp.py``; see ``docs/plans/2026-08-29-spp-validation-results.md``.
+
+This script anchors the network with a soft Dirichlet term on the domain
+boundary taken from the exact analytical SPP mode — without such a term the
+physics losses are minimised exactly by the trivial field E = H = 0.
+
 Usage:
     python scripts/train_spp_pinn.py [--config PATH] [--epochs N] [--lr LR] [--model-out PATH]
 
@@ -17,6 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.analytical import analytical_spp_fields, complex_to_pinn_format  # noqa: E402
+from src.constants import ETA0  # noqa: E402
 from src.models.loss_functions import (  # noqa: E402
     EM_CompositeLoss,
     MaxwellCurlLoss,
@@ -74,6 +84,16 @@ def main(argv=None):
         c[:, 2] = interface_z
         return c
 
+    def sample_boundary(n: int) -> torch.Tensor:
+        """Points on the six faces of the domain box, n // 6 per face."""
+        c = sample_collocation(n)
+        bounds = (x_range, y_range, z_range)
+        for face_start, axis in enumerate((0, 0, 1, 1, 2, 2)):
+            lo_or_hi = face_start % 2
+            rows = slice(face_start * (n // 6), (face_start + 1) * (n // 6))
+            c[rows, axis] = bounds[axis][lo_or_hi]
+        return c
+
     interface_coords = sample_interface(num_interface)
 
     normal_vectors = torch.zeros_like(interface_coords)
@@ -116,16 +136,38 @@ def main(argv=None):
     composite_loss = EM_CompositeLoss(losses=loss_fns, adaptive_weights=True)
     optimizer = torch.optim.Adam(spp_network.parameters(), lr=lr)
 
+    # Soft Dirichlet anchor from the exact analytical mode: pins amplitude and
+    # phase, removing the trivial E = H = 0 minimiser of the physics losses.
+    # E channels are scaled by 1/eta0 so the E and H terms are comparable.
+    anchor_scale = torch.tensor([1.0 / ETA0] * 3 + [1.0] * 3, device=device).view(1, 6, 1)
+
+    def anchor_loss(n_points: int) -> torch.Tensor:
+        b = sample_boundary(n_points)
+        E_a, H_a = analytical_spp_fields(
+            b.cpu(),
+            config["frequency"],
+            eps_m,
+            eps_m,
+            eps_dielectric=config["dielectric_permittivity"],
+        )
+        target = complex_to_pinn_format(torch.cat([E_a, H_a], dim=1)).to(
+            device=device, dtype=torch.float32
+        )
+        return torch.mean(((spp_network(b) - target) * anchor_scale) ** 2)
+
     for epoch in range(num_epochs):
         optimizer.zero_grad()
         # Fresh collocation points every epoch (a fixed set lets the network overfit it)
         collocation_coords = sample_collocation(num_collocation)
-        total_loss, loss_dict = composite_loss.compute(
+        physics_loss, loss_dict = composite_loss.compute(
             network=spp_network,
             coords=collocation_coords,
             interface_coords=interface_coords,
             normal_vectors=normal_vectors,
         )
+        loss_anchor = anchor_loss(num_interface)
+        loss_dict["anchor"] = loss_anchor
+        total_loss = physics_loss + 10.0 * loss_anchor
         total_loss.backward()
         optimizer.step()
 

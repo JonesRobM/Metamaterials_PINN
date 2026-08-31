@@ -197,6 +197,28 @@ loss = loss_fn(network=network, coords=coords)
 
 Full training loops live in `scripts/train_*.py`; see `--help` on each for options.
 
+## ✅ Validation Status
+
+The physics engine is verified against independent ground truth at every layer
+(all in the test suite, `pytest -q`):
+
+| Layer | Benchmark | Result |
+|---|---|---|
+| Differential operators & curl losses | Exact extraordinary wave in a uniaxial crystal (`tests/test_benchmark_anisotropic.py`) | residuals ~1e-15 relative |
+| Interface machinery | Exact Fresnel solution, TE/TM, lossy included (`tests/test_benchmark_fresnel.py`) | machine precision; Brewster \|r_p\| ~ 1e-17 |
+| SPP analytics | Johnson & Christy silver at 633 nm + independent root-finding (`tests/test_benchmark_spp.py`) | L = 56.4 µm, δ_m = 22.9 nm — all within literature bands |
+| Analytical SPP mode | Maxwell + continuity via the validated operators (`tests/test_analytical_spp.py`) | machine precision |
+
+End-to-end experiments (each recovers a known solution from physics + a boundary
+anchor; results in `docs/plans/`):
+
+- **Plane wave** — `examples/validate_plane_wave.py`: relative L2 ≈ 8e-4,
+  wavelength error 9e-5, E ⊥ H confirmed.
+- **Surface plasmon (silver/air, 633 nm)** — `examples/validate_spp.py`:
+  the PINN recovers the bound SPP mode (relative L2 ≈ 0.05, k_spp to 0.06%),
+  using a displacement adapter so the physical E_z discontinuity at the
+  interface is exact by construction.
+
 ## 🛠️ Technical Details
 
 ### Automatic Differentiation

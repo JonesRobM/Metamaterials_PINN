@@ -208,3 +208,4 @@ artifacts/runs/
 !/figures/pinn_point_charge_heatmap.png
 !/figures/point_charge_electric_field.png
 !/figures/plane_wave_validation/
+!/figures/spp_validation/
