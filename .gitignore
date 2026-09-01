@@ -5,7 +5,11 @@ __pycache__/
 
 # C extensions
 *.so
+# Local AI-assistant tooling and internal policy files: development aids,
+# not part of the deliverable. Both cases, since git ignore matching is
+# case-sensitive by default.
 *claude*
+*CLAUDE*
 figures/local/*
 # Distribution / packaging
 .Python

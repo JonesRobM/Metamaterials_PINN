@@ -5,8 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to the same ref makes older runs pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -19,6 +25,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install (CPU-only torch)
         run: |
@@ -29,5 +36,50 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      # Coverage sat at 91% when this threshold was set; the floor is
+      # deliberately below that so routine work does not trip it, while a
+      # real regression still does.
       - name: Test
-        run: pytest -m "not slow" --cov=src --cov=config --cov-report=term-missing
+        run: >
+          pytest -m "not slow"
+          --cov=src --cov=config
+          --cov-report=term-missing --cov-report=xml
+          --cov-fail-under=85
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: warn
+
+  examples:
+    name: Analytics examples smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (CPU-only torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+
+      # Analytics only — no training. Measured runtimes on a laptop CPU:
+      # validate_physics 1 s, dispersion_analysis 2 s, hyperbolic_metamaterial
+      # 1 s, inverse_design 8 s, emt_validity 33 s. The PINN experiments take
+      # 30-80 minutes and are deliberately excluded.
+      - name: Run fast studies
+        run: |
+          python scripts/validate_physics.py
+          python examples/dispersion_analysis.py
+          python examples/hyperbolic_metamaterial.py
+          python examples/inverse_design.py
+          python examples/emt_validity.py

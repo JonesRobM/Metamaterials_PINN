@@ -1,314 +1,312 @@
 # Surface Plasmon Polaritons on Metamaterials via Physics-Informed Neural Networks
 
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![CI](https://github.com/JonesRobM/Metamaterials_PINN/actions/workflows/ci.yml/badge.svg)](https://github.com/JonesRobM/Metamaterials_PINN/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-*Revolutionising electromagnetic metamaterial design through AI-driven physics simulation*
+Physics-informed neural networks (PINNs) that solve frequency-domain Maxwell's
+equations for surface plasmon polaritons at metamaterial interfaces, validated
+throughout against closed-form and transfer-matrix references.
 
-## 🔬 Overview
+The headline result: a PINN trained on a **real Ag/silica multilayer** predicts
+the bound surface mode substantially more accurately than the effective-medium
+approximation normally used for such structures — 472x closer in Re *k*<sub>spp</sub>
+and 17.5x closer in Im *k*<sub>spp</sub>, measured against a transfer-matrix solution.
 
-This project demonstrates a cutting-edge approach to modelling **surface plasmon polaritons (SPPs)** on metamaterial interfaces using **Physics-Informed Neural Networks (PINNs)**. By embedding Maxwell's equations directly into the neural network training process, we achieve unprecedented accuracy in predicting complex electromagnetic phenomena without requiring extensive experimental data.
+<p align="center">
+  <img src="figures/multilayer/field_profiles.png" width="90%"
+       alt="PINN, transfer-matrix and effective-medium field profiles through an Ag/silica multilayer">
+</p>
 
-### Why This Matters
-
-Traditional numerical methods for electromagnetic simulation face significant challenges when dealing with metamaterials:
-- **Computational complexity** scales poorly with frequency and structure size
-- **Mesh requirements** become prohibitive for subwavelength features
-- **Convergence issues** arise near plasmonic resonances
-- **Limited generalisability** across parameter spaces
-
-Our PINN approach overcomes these limitations by learning the underlying physics directly, enabling:
-- ⚡ **Real-time field prediction** across arbitrary geometries
-- 🎯 **Mesh-free computation** with automatic differentiation
-- 🔄 **Inverse design capabilities** for optimal metamaterial parameters
-- 📈 **Scalable simulation** from nanoscale to macroscale structures
+*The E<sub>z</sub> sawtooth (panel b) is the point: the field is discontinuous at all
+13 interfaces. The PINN (orange) tracks the transfer-matrix truth (black); the
+homogenised model (dashed) draws a smooth curve straight through it.*
 
 ---
 
-## 🧮 The Physics
+## What this project does
 
-### Surface Plasmon Polaritons
-SPPs are electromagnetic waves that propagate along metal-dielectric interfaces, combining light with collective electron oscillations. In metamaterials, these can be engineered to achieve:
+Solvers for plasmonic metamaterials either mesh the structure (expensive at
+subwavelength feature sizes) or homogenise it into an effective medium (cheap,
+but approximate in ways that are rarely quantified). This repository explores
+the third option — learning the field directly from Maxwell's equations — and
+measures how well it works at every step against references that are themselves
+independently validated.
 
-- **Subwavelength confinement** beyond the diffraction limit
-- **Enhanced field intensities** for sensing and nonlinear optics  
-- **Negative refractive indices** for cloaking applications
-- **Broadband operation** through dispersion engineering
+Three things distinguish it from a typical PINN demonstration:
 
-### Maxwell's Equations in Frequency Domain
-With the `e^{-iωt}` time convention (so lossy media have Im ε > 0 and decaying
-waves have Im k > 0), the electromagnetic behaviour is governed by:
-
-```
-∇ × E =  iωμ₀H    (Faraday's law)
-∇ × H = -iωε₀εᵣE  (Ampère's law)
-∇ · (εᵣE) = 0     (Gauss's law)
-∇ · H = 0         (No magnetic monopoles)
-```
-
-### Metamaterial Constitutive Relations
-For uniaxial metamaterials with optical axis along ẑ:
-
-```
-εᵣ = [ε⊥  0   0 ]
-     [0   ε⊥  0 ]  
-     [0   0   ε∥]
-```
-
-Where `ε⊥` and `ε∥` are engineered through subwavelength structuring.
+1. **Every physics routine is pinned to an external reference.** The curl and
+   divergence operators, the anisotropic permittivity path, the interface
+   conditions and the surface-plasmon dispersion are each benchmarked against
+   exact solutions or literature values, not merely against each other.
+2. **Negative results are reported.** Two experiments initially collapsed to the
+   trivial zero field; the cause and the fix are documented rather than quietly
+   overwritten. Where a target was missed, it says so.
+3. **The project's own central approximation is tested.** Homogenising the
+   multilayer turns out to carry an O(*a*) surface-term error, an order of
+   magnitude stricter than the usual "period much less than lambda" rule — see
+   [Known limitations](#known-limitations).
 
 ---
 
-## 🏗️ Architecture
+## Physics
 
-### 🧠 Physics-Informed Neural Network
+### Governing equations
 
-Our PINN architecture directly embeds physical laws into the loss function:
-
-```python
-L_total = λ₁L_maxwell + λ₂L_boundary + λ₃L_data + λ₄L_initial
-```
-
-- **L_maxwell**: Residuals of Maxwell's equations at collocation points
-- **L_boundary**: Interface boundary conditions (E/H field continuity)
-- **L_data**: Sparse experimental/simulation data (when available)
-- **L_initial**: Initial conditions for time-dependent problems
-
-### 📁 Project Structure
+With the `e^{-iwt}` time convention (so lossy media have Im eps > 0 and decaying
+waves have Im *k* > 0):
 
 ```
-Metamaterials_PINN/
-├── src/
-│   ├── constants.py          # Shared physical constants (EPS0, MU0, C0, ETA0)
-│   ├── analytical.py         # Closed-form reference solutions (plane wave, point charge)
-│   ├── physics/              # Core electromagnetic physics
-│   │   ├── maxwell_equations.py    # Frequency-domain Maxwell operators
-│   │   ├── metamaterial.py         # Anisotropic constitutive relations
-│   │   └── boundary_conditions.py  # Interface continuity conditions
-│   ├── models/               # Neural network architectures
-│   │   ├── pinn_network.py         # ElectromagneticPINN, ComplexPINN, SPPNetwork, ...
-│   │   ├── loss_functions.py       # Physics-informed loss terms
-│   │   └── electrostatics_pinn.py  # Small Laplace/point-charge PINN
-│   ├── data/
-│   │   └── domain_sampler.py       # Uniform / stratified / interface / SPP / adaptive sampling
-│   └── utils/
-│       ├── plotting.py             # Field and training visualisation
-│       └── metrics.py              # Residual, SPP and accuracy metrics
-│
-├── config/                   # YAML configuration and ConfigManager
-├── tests/                    # pytest suite (physics, models, losses, config, examples)
-├── scripts/                  # Entry points (all accept --help)
-│   ├── validate_physics.py         # Sanity-check the physics module
-│   ├── run_tests.py                # Run the whole test suite
-│   ├── train_plane_wave_pinn.py    # Train ComplexPINN on a free-space plane wave
-│   ├── train_point_charge_pinn.py  # Train ElectrostaticsPINN on a point charge
-│   ├── train_spp_pinn.py           # Train SPPNetwork from config/spp_config.yaml
-│   ├── visualize_pinn_plane_wave.py
-│   ├── visualize_pinn_field.py
-│   └── visualize_point_charge.py
-├── examples/
-│   └── validate_plane_wave.py      # Plane-wave validation example
-├── notebooks/                # Standalone PINN tutorials (not part of the SPP pipeline)
-├── artifacts/models/         # Trained weights (*.pth)
-├── figures/                  # Generated plots
-└── docs/
+curl E =  i w mu0 H            (Faraday)
+curl H = -i w eps0 eps_bar E   (Ampere)
+div (eps_bar E) = 0            (Gauss)
+div H = 0                      (no magnetic monopoles)
 ```
+
+### Uniaxial metamaterials
+
+For a medium with optical axis along z,
+
+```
+eps_bar = diag(eps_perp, eps_perp, eps_par)
+```
+
+where the two components are engineered by subwavelength structuring. This
+repository builds them from a real structure — an Ag/silica multilayer
+homogenised by effective-medium theory (`src/effective_medium.py`) — rather than
+choosing them by hand, so the design parameters are ones a fabricator could act
+on.
+
+### The loss
+
+```
+L = w1*||curl E - i w mu0 H||^2 + w2*||curl H + i w eps0 eps_bar E||^2
+  + w3*||div D||^2 + w4*||BC||^2 + w5*||anchor||^2
+```
+
+The Maxwell residuals alone are minimised exactly by **E = H = 0**. Every
+experiment therefore carries a soft boundary anchor taken from the reference
+solution; without it, training reliably collapses to the trivial field. This was
+learned the hard way — see `docs/plans/`.
 
 ---
 
-## ✨ Key Features
+## Results
 
-### 🎯 **Mesh-Free Simulation**
-- No spatial discretisation required
-- Automatic handling of complex geometries
-- Adaptive resolution based on field gradients
+Each experiment recovers a known solution from the physics loss plus a boundary
+anchor, with no interior data. Errors are relative L2 against the reference
+field.
 
-### ⚡ **Real-Time Prediction**  
-- Forward pass inference in milliseconds
-- Enables interactive design exploration
-- Suitable for real-time optimization loops
+| Experiment                                       | Reference                 |      Field error |    Dispersion error |
+| ------------------------------------------------ | ------------------------- | ---------------: | ------------------: |
+| Plane wave in free space                         | analytic                  |           7.8e-4 | 8.7e-5 (wavelength) |
+| SPP, silver/air at 633 nm                        | analytic                  |           3.9e-3 |              8.3e-5 |
+| SPP, uniaxial metamaterial                       | analytic                  |           9.0e-3 |              1.6e-4 |
+| Dispersion, one omega-conditioned network        | analytic                  |     1.9e-2 worst |        2.6e-3 worst |
+| Design space, one (omega, f)-conditioned network | analytic                  |     3.5e-2 worst |        3.4e-3 worst |
+| **Real multilayer, 13 interfaces**         | **transfer matrix** | **5.8e-3** |    **4.9e-5** |
 
-### 🔄 **Inverse Design Capability**
-- Optimize metamaterial parameters for target responses
-- Discover novel plasmonic structures
-- Multi-objective design optimization
+Dispersion error is the relative error in Re *k*<sub>spp</sub> except for the
+plane wave, where the recovered wavelength is quoted.
 
-### 📏 **Multi-Scale Modelling**
-- Seamless transition from nanoscale to macroscale
-- Handles both local field enhancement and far-field radiation
-- Automatic resolution adaptation
+Two results are worth expanding on.
 
-### 🎨 **Sophisticated Visualisation**
-- Real-time field plotting with interactive controls
-- 3D electromagnetic field rendering
-- Dispersion relation visualisation
-- Poynting vector flow analysis
+### One network covers a continuum
+
+A single frequency-conditioned network reproduces the whole SPP dispersion curve
+of a dispersive metamaterial across a 65%-wide band, rather than needing one
+network per frequency. It reproduces the *curvature*, not just the slope: its
+residuals about a straight line trace the analytical curvature to 1.7%.
+
+Extending the conditioning to the metal fill fraction *f* gives a surrogate over
+the whole fabricable design space (omega, *f*). Gradient descent **through the
+trained network** then solves an inverse-design problem — find the fill fraction
+achieving a target effective index — matching the closed-form answer to
+delta-*f* of about 5e-5.
+
+<p align="center">
+  <img src="figures/hmm_surrogate/k_spp_surface.png" width="90%"
+       alt="Analytical, PINN and error maps of k_spp over the (omega, f) design space">
+</p>
+
+### The multilayer result
+
+At a 30 nm layer period the effective-medium approximation misestimates
+Re *k*<sub>spp</sub> by 2.3% and Im *k*<sub>spp</sub> by 34%. A PINN trained on the
+actual layers reduces those to 0.005% and 1.9%:
+
+|                          | Re*k*<sub>spp</sub>/k0 |            error | Im*k*<sub>spp</sub> (1/m) |           error |
+| ------------------------ | -----------------------: | ---------------: | --------------------------: | --------------: |
+| Transfer matrix (truth)  |                 1.058313 |               — |                        8813 |              — |
+| Effective medium         |                 1.082930 |            2.33% |                       11778 |           33.6% |
+| **PINN (layered)** |       **1.058365** | **0.005%** |              **8982** | **1.92%** |
+
+The mechanism is a *displacement adapter*: the network emits a continuous
+D<sub>z</sub>, which is divided by the piecewise-constant eps(z), so the physical
+E<sub>z</sub> discontinuity is exact by construction at every interface rather
+than something a smooth network must approximate. It generalises from one
+interface to many for free, and E<sub>z</sub> ends up the *most* accurately
+predicted component.
 
 ---
 
-## 🚀 Quick Start
+## Validation
 
-### Installation
+Every physics routine is benchmarked against an independent reference:
+
+| Layer                               | Benchmark                                        | Result                                                        |
+| ----------------------------------- | ------------------------------------------------ | ------------------------------------------------------------- |
+| Differential operators, curl losses | exact extraordinary wave in a uniaxial crystal   | residuals ~1e-15                                              |
+| Interface conditions                | exact Fresnel solution, TE/TM, lossy             | machine precision; Brewster\|r_p\| ~ 1e-17                    |
+| SPP analytics                       | Johnson & Christy silver at 633 nm               | L = 56.4 um, delta_metal = 22.9 nm — within literature bands |
+| Transfer-matrix solver              | Fresnel; closed-form SPP; thin-film branches     | 5e-17; 3.6e-19; correct long/short-range splitting            |
+| Analytical SPP mode                 | Maxwell + continuity via the validated operators | machine precision                                             |
+
+Each PINN experiment also pushes its *reference* solution through the identical
+validation pipeline as a self-check, so reported errors measure the network
+rather than the measurement.
+
 ```bash
-# Clone the repository
-git clone https://github.com/JonesRobM/Metamaterials_PINN.git
-cd Metamaterials_PINN
-
-# Create a virtual environment and install in editable mode with dev/viz extras
-python -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
-# (or: uv venv --python 3.12 .venv && uv pip install -r requirements-dev.txt)
+pytest -q                             # 865 tests
+python scripts/validate_physics.py
 ```
 
-### Validate the physics implementation
+---
+
+## Known limitations
+
+**Homogenisation.** The metamaterial results model the multilayer as a uniform
+uniaxial medium. `examples/emt_validity.py` tests that directly against a
+transfer-matrix solve of the real stack and finds the leading error is **O(a)**
+in the layer period — a termination effect — not the **O((a/lambda)^2)** bulk
+term the usual rule guards. Metal- and dielectric-terminated stacks err by equal
+magnitudes with opposite signs, which is the signature.
+
+| Layer period | Error in Re*k*<sub>spp</sub> | Error in Im*k*<sub>spp</sub> |
+| ------------ | ------------------------------ | ------------------------------ |
+| 2 nm         | 0.2%                           | 1.9%                           |
+| 10 nm        | 0.9%                           | 9.1%                           |
+| 30 nm        | 2.3%                           | 24%                            |
+
+Homogenised *dispersion* is reliable; homogenised **loss figures are optimistic**
+unless the period is small. Terminating the stack with a half-thickness metal
+layer cancels the O(a) term and restores O(a^2), holding the error under 1% out
+to a 60 nm period.
+
+**Other caveats.** Silver is a Drude fit with no interband transitions, so it
+degrades below ~450 nm. The dispersion experiments hold eps fixed or take it
+from effective-medium theory rather than measured data. Training runs are
+CPU-bound (~30-80 minutes each); float32 sets the residual floor unless the
+L-BFGS refinement runs in float64.
+
+---
+
+## Quick start
+
 ```bash
+# Environment (uv recommended; a plain venv works too)
+uv venv --python 3.12 .venv
+uv pip install -r requirements-dev.txt
+
+# Verify the physics implementation and run the test suite
 .venv/bin/python scripts/validate_physics.py
-.venv/bin/python -m pytest -q          # or: python scripts/run_tests.py
+.venv/bin/python -m pytest -q
 ```
 
-### Basic Usage
+Analytics-only studies run in seconds and need no training:
+
+```bash
+.venv/bin/python examples/dispersion_analysis.py      # SPP dispersion, design-space maps
+.venv/bin/python examples/hyperbolic_metamaterial.py  # multilayer -> uniaxial, band selection
+.venv/bin/python examples/inverse_design.py           # gradient-based design, Pareto front
+.venv/bin/python examples/emt_validity.py             # where homogenisation breaks down
+```
+
+Training experiments take 30-80 minutes on CPU; all checkpoint and support
+`--resume`:
+
+```bash
+.venv/bin/python examples/validate_spp.py --case uniaxial
+.venv/bin/python examples/validate_multilayer.py
+```
+
+### Library use
+
 ```python
 import numpy as np
-import torch
+from src.effective_medium import hmm_permittivities
+from src.physics.metamaterial import MetamaterialProperties
+from src.constants import C0
 
-from src.physics import MaxwellEquations, MetamaterialProperties
-from src.models import SPPNetwork, MaxwellCurlLoss
-from src.data import UniformSampler
+omega = 2 * np.pi * C0 / 633e-9
 
-omega = 2 * np.pi * 1e15  # 1 PHz
+# An Ag/silica multilayer, 30% metal by volume, homogenised
+eps_t, eps_n = hmm_permittivities(omega, fill_fraction=0.30, eps_dielectric_layer=2.25)
 
-# Define metamaterial
-metamaterial = MetamaterialProperties(
-    eps_parallel=4.0 + 0.05j,      # along the optical axis (z, interface normal)
-    eps_perpendicular=-2.0 + 0.1j, # in-plane: negative => binds a TM surface wave
-    optical_axis='z'
-)
-
-# Initialise PINN and physics loss
-network = SPPNetwork(spatial_dim=3, hidden_dims=[64, 64, 64], frequency=omega)
-loss_fn = MaxwellCurlLoss(frequency=omega)
-
-# Sample collocation points and evaluate the Maxwell residual loss
-sampler = UniformSampler(domain_bounds=[(-1e-6, 1e-6)] * 3)
-coords = sampler.sample_points(n_points=1000)['points'].requires_grad_(True)
-loss = loss_fn(network=network, coords=coords)
+# Its surface-plasmon mode against air
+medium = MetamaterialProperties(eps_n, eps_t, optical_axis="z", omega=omega)
+k_spp = medium.spp_wavevector(eps_dielectric=1.0)
+print(f"n_eff = {k_spp.real / (omega / C0):.4f}, L = {medium.propagation_length() * 1e6:.1f} um")
 ```
-
-Full training loops live in `scripts/train_*.py`; see `--help` on each for options.
-
-## ✅ Validation Status
-
-The physics engine is verified against independent ground truth at every layer
-(all in the test suite, `pytest -q`):
-
-| Layer | Benchmark | Result |
-|---|---|---|
-| Differential operators & curl losses | Exact extraordinary wave in a uniaxial crystal (`tests/test_benchmark_anisotropic.py`) | residuals ~1e-15 relative |
-| Interface machinery | Exact Fresnel solution, TE/TM, lossy included (`tests/test_benchmark_fresnel.py`) | machine precision; Brewster \|r_p\| ~ 1e-17 |
-| SPP analytics | Johnson & Christy silver at 633 nm + independent root-finding (`tests/test_benchmark_spp.py`) | L = 56.4 µm, δ_m = 22.9 nm — all within literature bands |
-| Analytical SPP mode | Maxwell + continuity via the validated operators (`tests/test_analytical_spp.py`) | machine precision |
-
-End-to-end experiments (each recovers a known solution from physics + a boundary
-anchor; results in `docs/plans/`):
-
-- **Plane wave** — `examples/validate_plane_wave.py`: relative L2 ≈ 8e-4,
-  wavelength error 9e-5, E ⊥ H confirmed.
-- **Surface plasmon (silver/air, 633 nm)** — `examples/validate_spp.py`:
-  the PINN recovers the bound SPP mode (relative L2 ≈ 4e-3, k_spp to 0.008%,
-  decay constants < 1%), using a displacement adapter so the physical E_z
-  discontinuity at the interface is exact by construction.
-- **Anisotropic SPP (uniaxial metamaterial)** — `examples/validate_spp.py
-  --case uniaxial`: relative L2 ≈ 9e-3, k_spp to 0.016%, both decay
-  constants < 1%.
-- **Dispersion recovery (one ω-conditioned network)** — `examples/validate_spp_dispersion.py`:
-  a single frequency-conditioned PINN reproduces k_spp(ω) across a 30 %-wide
-  band (worst relative L2 0.026, k_spp to 0.15 %) instead of retraining per
-  frequency.
-- **Design space & inverse design** — `examples/dispersion_analysis.py`
-  (bound-mode existence and dispersion maps over the (ε_t, ε_n) plane) and
-  `examples/inverse_design.py` (gradient-based design through the
-  differentiable dispersion in `src/design.py`: target wavevector, maximum
-  propagation under a confinement bound, target field enhancement).
-
-### Known limitation: homogenisation of the multilayer
-
-The metamaterial results above model the Ag/silica multilayer as a *homogeneous*
-uniaxial medium. `examples/emt_validity.py` tests that approximation directly,
-against a transfer-matrix solve of the real layered stack
-(`src/transfer_matrix.py`, itself validated to 10⁻¹² against Fresnel and to
-10⁻¹⁹ against the closed-form single-interface SPP).
-
-The finding is that for a *surface* mode the leading error is **O(a)** in the
-layer period — a termination effect — not the **O((a/λ)²)** bulk term that the
-usual "period ≪ λ" rule guards. Metal- and dielectric-terminated stacks err by
-equal magnitudes with opposite signs, which is the signature. In practice:
-
-| layer period | error in Re k_spp | error in Im k_spp (∝ propagation length) |
-|---|---|---|
-| 2 nm | 0.2 % | 1.9 % |
-| 10 nm | 0.9 % | 9.1 % |
-| 30 nm | 2.3 % | 24 % |
-
-So the homogenised dispersion is reliable, but homogenised **loss figures are
-optimistic** unless the period is very small. Terminating the stack with a
-half-thickness metal layer cancels the O(a) term and restores O(a²), holding
-the error below 1 % out to a 60 nm period.
-
-## 🛠️ Technical Details
-
-### Automatic Differentiation
-We leverage PyTorch's automatic differentiation to compute spatial derivatives:
-
-```python
-def curl_operator(self, field, coords):
-    """Compute ∇ × field using automatic differentiation."""
-    # Partial derivatives computed via autodiff
-    dFz_dy = torch.autograd.grad(Fz, coords, create_graph=True)[0][:, 1]
-    # ... (curl computation)
-    return curl
-```
-
-### Adaptive Sampling
-Smart collocation point placement based on:
-- **Residual magnitude**: Higher density where physics violations occur
-- **Field gradients**: Enhanced resolution near interfaces
-- **Geometric features**: Automatic refinement around sharp boundaries
-
-### Loss Function Design
-Carefully balanced multi-term loss ensures physical consistency:
-
-```python
-L = λ₁‖∇×E - iωμ₀H‖² + λ₂‖∇×H + iωε₀εᵣE‖² + 
-    λ₃‖boundary_conditions‖² + λ₄‖training_data‖²
-```
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgments
+## Repository layout
 
-- **Funding**: URF\R1\231460
-- **Inspiration**: The metamaterials and machine learning communities
+```
+src/
+├── physics/            Maxwell operators, boundary conditions, SPP dispersion
+├── models/             PINN architectures, loss functions, field formats
+├── data/               collocation-point sampling
+├── utils/              metrics and plotting
+├── analytical.py       closed-form references (plane wave, SPP mode, point charge)
+├── effective_medium.py multilayer -> uniaxial homogenisation (Drude + layered EMT)
+├── transfer_matrix.py  exact layered-stack solver and mode finder
+├── design.py           differentiable dispersion for inverse design
+└── constants.py        SI constants (c exact, eps0 derived)
+
+examples/               validation experiments and analytics studies
+scripts/                training entry points and utilities
+tests/                  865 tests, including the benchmark suites
+docs/plans/             design documents and per-experiment results
+figures/                generated figures and metrics.json per experiment
+```
+
+Every experiment writes a `metrics.json` alongside its figures, and each has a
+dated results document in `docs/plans/` recording hyperparameters, what was
+measured, and what failed.
 
 ---
 
-## 📞 Contact
+## Docker
 
-**Author**: Dr Robert Michael Jones
-**Email**: robert.m.jones@kcl.ac.uk  
-**Institution**: Department of Physics, King's College London 
-**ORCID**: [0000-0002-5422-3088](https://orcid.org/0000-0002-5422-3088)
+```bash
+docker build -t metamaterials-pinn .
+docker run --rm metamaterials-pinn
+```
 
 ---
 
-<div align="center">
+## Citation
 
-**⭐ Star this repository if you find it useful! ⭐**
+See [`CITATION.cff`](CITATION.cff).
 
-*Advancing the frontiers of computational electromagnetics through AI*
+## License
 
-</div>
+MIT — see [LICENSE](LICENSE).
+
+## Author
+
+**Dr Robert Michael Jones**
+
+*Currently*
+
+Applied AI Scientist, Whitespace
+
+*Previously*
+Department of Physics, King's College London
+[robert.m.jones@kcl.ac.uk](mailto:robert.m.jones@kcl.ac.uk) ·
+[ORCID 0000-0002-5422-3088](https://orcid.org/0000-0002-5422-3088)
+
+Funding: URF\R1\231460

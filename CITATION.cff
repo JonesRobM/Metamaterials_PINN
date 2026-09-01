@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Metamaterials PINN: physics-informed neural networks for surface plasmon polaritons on metamaterials"
+abstract: >-
+  Physics-informed neural networks that solve the frequency-domain Maxwell
+  equations for surface plasmon polaritons at metamaterial interfaces, with
+  every physics routine benchmarked against closed-form, literature or
+  transfer-matrix references. Includes an effective-medium treatment of
+  metal/dielectric multilayers, a transfer-matrix solver, differentiable
+  inverse design, and a study quantifying where homogenisation of the
+  multilayer breaks down.
+type: software
+authors:
+  - family-names: Jones
+    given-names: Robert Michael
+    name-suffix: PhD
+    email: robert.m.jones@kcl.ac.uk
+    orcid: "https://orcid.org/0000-0002-5422-3088"
+    affiliation: "Department of Physics, King's College London"
+repository-code: "https://github.com/JonesRobM/Metamaterials_PINN"
+license: MIT
+version: "0.1.0"
+keywords:
+  - physics-informed neural networks
+  - surface plasmon polaritons
+  - metamaterials
+  - computational electromagnetics
+  - hyperbolic metamaterials
+  - inverse design
