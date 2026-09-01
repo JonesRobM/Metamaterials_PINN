@@ -82,7 +82,7 @@ homogenised approximation, and judge against a transfer-matrix solution.
 
 Field relative L2 is 5.8×10⁻³ against 0.247 for the homogenised model, a factor
 of 43. A supervised probe run first — fitting the reference field directly, with
-no physics loss — reached 7.5×10⁻³ in 43 seconds, confirming the architecture
+no physics loss — reached 7.5×10⁻³ in 49 seconds, confirming the architecture
 could represent the field before committing to the full run. The trained PINN
 then beat that probe.
 

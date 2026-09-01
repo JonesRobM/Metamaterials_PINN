@@ -151,6 +151,25 @@ than something a smooth network must approximate. It generalises from one
 interface to many for free, and E<sub>z</sub> ends up the *most* accurately
 predicted component.
 
+### Which design choices actually matter
+
+`examples/ablation_study.py` removes one ingredient at a time from the
+single-interface case, on an identical (shortened) schedule and seed:
+
+| removed | relative L2 vs control | what breaks |
+|---|---:|---|
+| boundary anchor | 2.70x | collapses to 0.1% of the correct amplitude |
+| displacement adapter | 2.30x | E_z interface jump essentially unlearned (ratio 1.1 where it should be 18.3) |
+| per-medium loss weighting | 1.87x | metal-side physics dominates |
+| physics-loss ramp | 1.42x | slower, but no collapse |
+
+Only the control recovers a bound mode on *both* sides of the interface.
+
+The anchor result is the one worth dwelling on. Without it, training reaches a
+final loss **31,000x lower than the control** — a beautifully converging curve
+— while the field it has learned is 0.1% of the correct amplitude. The physics
+residual is genuinely minimised; it is just minimised by nothing at all.
+
 ---
 
 ## Validation
@@ -262,7 +281,7 @@ src/
 ├── models/             PINN architectures, loss functions, field formats
 ├── data/               collocation-point sampling
 ├── utils/              metrics and plotting
-├── analytical.py       closed-form references (plane wave, SPP mode, point charge)
+├── analytical.py       closed-form references (plane wave, SPP mode)
 ├── effective_medium.py multilayer -> uniaxial homogenisation (Drude + layered EMT)
 ├── transfer_matrix.py  exact layered-stack solver and mode finder
 ├── design.py           differentiable dispersion for inverse design

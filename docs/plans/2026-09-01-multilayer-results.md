@@ -217,7 +217,7 @@ field of this stack, by direct supervised regression with no physics loss? If
 not, no PINN objective could rescue it and the honest move would be to reduce N,
 widen a, or grow the network.
 
-**2500 Adam epochs at 4096 points, 43 s, seed 0 — rel L2 = 7.53e-3.**
+**2500 Adam epochs at 4096 points, 48.8 s, seed 0 — rel L2 = 7.53e-3.**
 
 | Region | probe rel L2 |
 |---|---:|
@@ -255,7 +255,7 @@ python examples/validate_multilayer.py --epochs 4000 --n-points 2048 \
 ```
 
 **45.2 min of training** (Adam 24.1 min, float64 L-BFGS 21.1 min at ~21 s/step)
-plus 43 s of probe and ~1 min of validation and figures — **≈ 48 min CPU total**,
+plus 48.8 s of probe and ~1 min of validation and figures — **≈ 48 min CPU total**,
 inside the 100 min budget with the diagnostic iteration unused for retraining.
 
 Final training loss 7.10e-4 (from 4.35 at epoch 0); the L-BFGS phase alone took

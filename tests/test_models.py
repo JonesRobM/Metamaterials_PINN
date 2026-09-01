@@ -4,9 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.analytical import analytical_potential
-from src.constants import C0, EPS0, ETA0
-from src.models.electrostatics_pinn import ElectrostaticsPINN, boundary_loss, laplace_residual
+from src.constants import C0, ETA0
 from src.models.field_format import join_complex, split_complex, to_complex
 from src.models.pinn_network import (
     ComplexLinear,
@@ -316,69 +314,6 @@ class TestMetamaterialDeepONet:
 
 
 # --------------------------------------------------------------------------- electrostatics
-class _AnalyticPotential(torch.nn.Module):
-    """2-D (line-charge) potential ``-(q / (2 pi eps0)) ln r``, matching src.analytical."""
-
-    def __init__(self, q=1e-9, q_pos=(0.0, 0.0)):
-        super().__init__()
-        self.q, self.q_pos = q, q_pos
-
-    def forward(self, xy):
-        k = 1.0 / (2.0 * np.pi * EPS0)
-        r = torch.sqrt((xy[:, 0] - self.q_pos[0]) ** 2 + (xy[:, 1] - self.q_pos[1]) ** 2)
-        return (-k * self.q * torch.log(r)).unsqueeze(1)
-
-
-class _Harmonic2D(torch.nn.Module):
-    """``V = x^2 - y^2 + log r`` is harmonic in 2-D away from the origin."""
-
-    def forward(self, xy):
-        r2 = xy[:, 0] ** 2 + xy[:, 1] ** 2
-        return (xy[:, 0] ** 2 - xy[:, 1] ** 2 + 0.5 * torch.log(r2)).unsqueeze(1)
-
-
-class TestElectrostaticsPINN:
-    def test_forward_shape(self):
-        net = ElectrostaticsPINN(num_layers=3, hidden_dim=8)
-        assert net(torch.randn(7, 2)).shape == (7, 1)
-
-    def test_laplace_residual_shape_and_gradient_flow(self):
-        torch.manual_seed(0)
-        net = ElectrostaticsPINN(num_layers=3, hidden_dim=8)
-        res = laplace_residual(net, torch.randn(9, 2))
-        assert res.shape == (9,)
-        res.pow(2).mean().backward()
-        # The output bias cannot influence a Laplacian, so it legitimately has no grad.
-        weights = [p for name, p in net.named_parameters() if name.endswith("weight")]
-        assert all(p.grad is not None and torch.isfinite(p.grad).all() for p in weights)
-        assert any(torch.any(p.grad != 0) for p in weights)
-        assert net.net[-1].bias.grad is None
-
-    def test_boundary_loss_zero_for_exact_values(self):
-        net = ElectrostaticsPINN(num_layers=3, hidden_dim=8)
-        c = torch.randn(5, 2)
-        with torch.no_grad():
-            v = net(c)
-        assert boundary_loss(net, c, v).item() == 0.0
-
-    def test_laplace_residual_vanishes_for_harmonic_function(self):
-        coords = torch.tensor([[1.0, 0.5], [-0.7, 1.2], [2.0, -1.0], [0.3, -0.4]], dtype=torch.float64)
-        res = laplace_residual(_Harmonic2D(), coords)
-        assert torch.allclose(res, torch.zeros_like(res), atol=1e-10)
-
-    def test_laplace_residual_vanishes_for_analytical_point_charge(self):
-        q, q_pos = 1e-9, (0.0, 0.0)
-        coords = torch.tensor([[1.0, 0.5], [-0.7, 1.2], [2.0, -1.0]], dtype=torch.float64)
-        net = _AnalyticPotential(q, q_pos)
-        # Sanity: the wrapper reproduces src.analytical.analytical_potential
-        ref = analytical_potential(coords[:, 0].numpy(), coords[:, 1].numpy(), q, q_pos)
-        assert np.allclose(net(coords).squeeze(1).detach().numpy(), ref, rtol=1e-6)
-        res = laplace_residual(net, coords)
-        r = coords.norm(dim=1)
-        scale = (net(coords).squeeze(1) / r**2).abs()
-        assert torch.all(res.abs() < 1e-6 * scale)
-
-
 # --------------------------------------------------------------------------- field format
 class TestFieldFormat:
     def test_round_trip_split_to_complex(self):

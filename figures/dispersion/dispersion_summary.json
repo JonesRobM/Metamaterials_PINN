@@ -6,18 +6,19 @@
   },
   "silver_at_633nm": {
     "eps_drude": [
-      -17.951691544900747,
-      0.1992908025250728
+      -17.88344930797712,
+      0.19834932569916894
     ],
     "eps_johnson_christy": [
       -18.3,
       0.55
     ],
-    "relative_deviation_vs_jc": 0.02699781148321329,
-    "n_eff": 1.0290690571389398,
-    "propagation_length_um": 149.74514707216684,
-    "penetration_depth_dielectric_nm": 415.4688021801544,
-    "penetration_depth_metal_nm": 23.1422031546189
+    "relative_deviation_vs_jc": 0.029775378510652022,
+    "wavelength_nm": 633.0,
+    "n_eff": 1.02918489280334,
+    "propagation_length_um": 149.02832118913688,
+    "penetration_depth_dielectric_nm": 413.9776614869914,
+    "penetration_depth_metal_nm": 23.14713935309367
   },
   "surface_plasmon_asymptote": {
     "hbar_omega_sp_eV": 4.1975169965314265,

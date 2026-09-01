@@ -75,7 +75,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import math
 import sys
@@ -98,6 +97,19 @@ if str(REPO_ROOT) not in sys.path:
 from examples.validate_spp import DisplacementAdapter  # noqa: E402
 from src.analytical import analytical_spp_fields, complex_to_pinn_format  # noqa: E402
 from src.constants import C0, EPS0, ETA0, MU0  # noqa: E402
+from src.experiments import (  # noqa: E402
+    LinearFeature,
+    TrainingConfig,
+    add_core_args,
+    add_output_args,
+    banded_success_tier,
+    load_core_checkpoint,
+    measurement,
+    relative_l2,
+    run_training,
+    write_checkpoint,
+    write_json_report,
+)
 from src.models import (  # noqa: E402
     ElectromagneticPINN,
     FourierEMFeatures,
@@ -130,17 +142,21 @@ _MATERIAL = MetamaterialProperties(EPS_N, EPS_T, "z")
 
 def mode_constants(omega: float) -> Tuple[complex, complex, complex]:
     """Analytical ``(k_spp, κ_d, κ_m)`` at ``omega`` (bound-mode branches)."""
-    return _MATERIAL._decay_constants(omega, EPS_D, "x")
+    return _MATERIAL.decay_constants(omega, EPS_D, "x")
+
+
+#: The frequency feature: ω̂ = (ω − ω₀)/(0.15 ω₀) ∈ [−1, 1] across the band.
+OMEGA_FEATURE = LinearFeature.centred(OMEGA0, BAND_HALF_WIDTH * OMEGA0)
 
 
 def omega_hat(omega: float) -> float:
     """Normalised frequency feature ω̂ = (ω − ω₀)/(0.15 ω₀) ∈ [−1, 1] on the band."""
-    return (omega - OMEGA0) / (BAND_HALF_WIDTH * OMEGA0)
+    return OMEGA_FEATURE.to_hat(omega)
 
 
 def omega_from_hat(w_hat: float) -> float:
     """Inverse of :func:`omega_hat`."""
-    return OMEGA0 * (1.0 + BAND_HALF_WIDTH * w_hat)
+    return OMEGA_FEATURE.from_hat(w_hat)
 
 
 # Dimensionless frame: x̂ = x/λ₀. The loss reference frequency is k̂₀(ω₀) = 2π;
@@ -514,25 +530,10 @@ def sample_training_batch(
 
 
 # --------------------------------------------------------------------------- training
-def _write_checkpoint(path: Path, state: dict, loss: float, phase: str) -> None:
-    """Atomically save the best weights so far (rename is atomic on POSIX).
-
-    Training runs take ~1 h on CPU; without this, an interrupted run loses
-    everything. Use ``--resume`` to reload the core weights and continue.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    torch.save({"state_dict": {k: v.cpu() for k, v in state.items()},
-                "best_loss": loss, "phase": phase}, tmp)
-    tmp.replace(path)
-
-
-def load_checkpoint_into(network: SPPDispersionPINN, path: Path) -> float:
-    """Load core weights from a training checkpoint; returns its recorded loss."""
-    blob = torch.load(Path(path), map_location="cpu", weights_only=False)
-    network.core.load_state_dict(blob["state_dict"])
-    return float(blob.get("best_loss", float("nan")))
+#: Atomic best-weights checkpointing (see :func:`src.experiments.write_checkpoint`).
+#: A run takes ~1 h on CPU; ``--resume`` reloads the core weights and continues.
+_write_checkpoint = write_checkpoint
+load_checkpoint_into = load_core_checkpoint
 
 
 def train(
@@ -555,34 +556,17 @@ def train(
     per-row folded frequency, tangential continuity across z = 0, and the
     analytical-mode anchor on the six faces at each block's own ω.
 
-    Phase 1 (Adam, cosine LR): each epoch draws ``N_FREQ_SUB`` fresh uniform
-    ω's over the band, one per sub-block; interior physics ramps 0 → 1 over the
-    first ``physics_ramp_frac`` of epochs (metal curl weight 1/|ε|,
-    anti-collapse). Phase 2 (L-BFGS, ``lbfgs_dtype``): a fixed batch of
-    ``LBFGS_POINTS_FACTOR * n_points`` points spanning :data:`LBFGS_OMEGAS`,
-    metal curl weight raised to 1/√|ε|; the network is converted back to
-    float32 at the end. Returns the network (best iterate restored) and the
-    loss history.
+    Phase 1 draws ``N_FREQ_SUB`` fresh uniform ω's over the band each epoch, one
+    per sub-block, with the metal curl weight at its anti-collapse 1/|ε|. Phase 2
+    refines on a fixed batch spanning :data:`LBFGS_OMEGAS`, with that weight
+    raised to 1/√|ε|. The schedule around the physics — ramp, best-iterate
+    tracking, checkpointing — is :func:`src.experiments.run_training`.
     """
     core = network.core
     curl_loss = MaxwellCurlLoss(frequency=OMEGA_HAT_REF, mu0=1.0, eps0=1.0)
     div_loss = MaxwellDivergenceLoss()
     cont_loss = TangentialContinuityLoss(offset=CONTINUITY_OFFSET / LAMBDA0)
     eps_m_diag = metal_eps_diag()
-
-    optimizer = torch.optim.Adam(core.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(1, n_epochs), eta_min=learning_rate * 1e-2
-    )
-    history: Dict[str, list] = {
-        "epoch": [], "total": [], "curl": [], "div": [], "continuity": [], "boundary": [], "lr": [],
-    }
-    best_loss = float("inf")
-    best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-
-    n_boundary = max(6 * N_FREQ_SUB, n_points // 2)
-    n_interface = max(N_FREQ_SUB, n_points // 4)
-    ramp_epochs = max(1, int(physics_ramp_frac * n_epochs))
 
     def compute_losses(batch: Dict[str, torch.Tensor], ramp=1.0, w_curl_m=None):
         if w_curl_m is None:
@@ -623,107 +607,44 @@ def train(
         )
         return total, l_curl, l_div, l_cont, l_bc
 
-    core.train()
-    t0 = time.perf_counter()
-    for epoch in range(n_epochs):
+    def sample_epoch(n_int, n_bc, n_if, dtype):
+        """Adam: a fresh uniform draw from the band, one ω per sub-block."""
         omegas = (OMEGA_MIN + (OMEGA_MAX - OMEGA_MIN) * torch.rand(N_FREQ_SUB)).tolist()
-        batch = sample_training_batch(n_points, n_boundary, n_interface, omegas, device=device)
-        ramp = min(1.0, (epoch + 1) / ramp_epochs)
-        optimizer.zero_grad(set_to_none=True)
-        loss, l_curl, l_div, l_cont, l_bc = compute_losses(batch, ramp=ramp)
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
+        return sample_training_batch(n_int, n_bc, n_if, omegas, device=device, dtype=dtype)
 
-        loss_val = loss.item()
-        history["epoch"].append(epoch)
-        history["total"].append(loss_val)
-        history["curl"].append(l_curl.item())
-        history["div"].append(l_div.item())
-        history["continuity"].append(l_cont.item())
-        history["boundary"].append(l_bc.item())
-        history["lr"].append(optimizer.param_groups[0]["lr"])
-
-        if ramp >= 1.0 and loss_val < best_loss and math.isfinite(loss_val):
-            best_loss = loss_val
-            best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-        # Checkpoint on a schedule (not only when a new best lands on a log epoch)
-        if checkpoint_path is not None and epoch % log_every == 0 and math.isfinite(best_loss):
-            _write_checkpoint(checkpoint_path, best_state, best_loss, f"adam:{epoch}")
-
-        if epoch % log_every == 0 or epoch == n_epochs - 1:
-            logger.info(
-                "epoch %5d | total %.3e | curl %.3e | div %.3e | cont %.3e | bc %.3e | lr %.2e | %.0fs",
-                epoch, loss_val, l_curl.item(), l_div.item(), l_cont.item(), l_bc.item(),
-                optimizer.param_groups[0]["lr"], time.perf_counter() - t0,
-            )
-
-    if lbfgs_steps > 0:
-        core.load_state_dict(best_state)
-        if lbfgs_dtype == torch.float64:
-            core.to(torch.float64)
-            logger.info("L-BFGS phase in float64 on %d fixed frequencies", len(LBFGS_OMEGAS))
-        batch = sample_training_batch(
-            LBFGS_POINTS_FACTOR * n_points,
-            LBFGS_POINTS_FACTOR * n_boundary,
-            LBFGS_POINTS_FACTOR * n_interface,
-            LBFGS_OMEGAS,
-            device=device,
-            dtype=lbfgs_dtype,
+    def sample_fixed(n_int, n_bc, n_if, dtype):
+        """L-BFGS: the fixed band spanned by :data:`LBFGS_OMEGAS`."""
+        return sample_training_batch(
+            n_int, n_bc, n_if, LBFGS_OMEGAS, device=device, dtype=dtype
         )
-        lbfgs = torch.optim.LBFGS(
-            core.parameters(), lr=1.0, max_iter=20, history_size=50,
-            tolerance_grad=1e-12, tolerance_change=1e-14, line_search_fn="strong_wolfe",
-        )
-        parts: Dict[str, float] = {}
 
-        def closure() -> torch.Tensor:
-            lbfgs.zero_grad(set_to_none=True)
-            loss, l_curl, l_div, l_cont, l_bc = compute_losses(
-                batch, w_curl_m=METAL_CURL_WEIGHT_LBFGS
-            )
-            loss.backward()
-            parts.update(
-                curl=l_curl.item(), div=l_div.item(), cont=l_cont.item(), bc=l_bc.item()
-            )
-            return loss
-
-        for step in range(lbfgs_steps):
-            loss_val = float(lbfgs.step(closure).detach())
-            history["epoch"].append(n_epochs + step)
-            history["total"].append(loss_val)
-            history["curl"].append(parts["curl"])
-            history["div"].append(parts["div"])
-            history["continuity"].append(parts["cont"])
-            history["boundary"].append(parts["bc"])
-            history["lr"].append(float("nan"))
-            if loss_val < best_loss and math.isfinite(loss_val):
-                best_loss = loss_val
-                best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-                # L-BFGS steps cost ~20 s each, so checkpoint every improvement:
-                # an interrupted refinement then loses at most one step.
-                if checkpoint_path is not None:
-                    _write_checkpoint(checkpoint_path, best_state, best_loss, f"lbfgs:{step}")
-            logger.info(
-                "lbfgs %3d | total %.3e | curl %.3e | div %.3e | cont %.3e | bc %.3e | %.0fs",
-                step, loss_val, parts["curl"], parts["div"], parts["cont"], parts["bc"],
-                time.perf_counter() - t0,
-            )
-            if not math.isfinite(loss_val):
-                logger.warning("L-BFGS produced a non-finite loss; stopping refinement")
-                break
-
-    core.load_state_dict(best_state)
-    network.to(torch.float32)
-    logger.info("restored best weights (loss %.3e)", best_loss)
-    return network, history
+    return run_training(
+        network,
+        TrainingConfig(
+            n_epochs=n_epochs,
+            n_points=n_points,
+            n_boundary=max(6 * N_FREQ_SUB, n_points // 2),
+            n_interface=max(N_FREQ_SUB, n_points // 4),
+            learning_rate=learning_rate,
+            physics_ramp_frac=physics_ramp_frac,
+            lbfgs_steps=lbfgs_steps,
+            lbfgs_dtype=lbfgs_dtype,
+            lbfgs_points_factor=LBFGS_POINTS_FACTOR,
+            log_every=log_every,
+        ),
+        sample_epoch,
+        compute_losses,
+        logger,
+        lbfgs_sample_batch=sample_fixed,
+        lbfgs_loss_kwargs={"w_curl_m": METAL_CURL_WEIGHT_LBFGS},
+        checkpoint_path=checkpoint_path,
+        lbfgs_note=f" on {len(LBFGS_OMEGAS)} fixed frequencies",
+    )
 
 
 # --------------------------------------------------------------------------- validation
-def _relative_l2(pred: torch.Tensor, ref: torch.Tensor) -> float:
-    return (
-        torch.linalg.vector_norm(pred - ref) / torch.linalg.vector_norm(ref).clamp_min(1e-30)
-    ).item()
+#: ``‖pred − ref‖ / ‖ref‖`` — see :func:`src.experiments.relative_l2`.
+_relative_l2 = relative_l2
 
 
 def _line_along_x(z: float, n: int, device: torch.device) -> torch.Tensor:
@@ -764,25 +685,11 @@ def fit_decay_constants(
     _, kappa_d, kappa_m = mode_constants(omega)
     if x is None:
         x = 0.25 * X_MAX
-    out: Dict[str, float] = {}
-    for side, z_lo, z_hi, kappa_ref, sign, name in [
-        ("air", guard, 0.9 * Z_MAX, kappa_d.real, -1.0, "kappa_d"),
-        ("metal", 0.95 * Z_MIN, -guard, kappa_m.real, 1.0, "kappa_m"),
-    ]:
-        z = torch.linspace(z_lo, z_hi, n_line, device=device)
-        coords = torch.stack(
-            [torch.full_like(z, x), torch.full_like(z, Y_MAX / 2), z], dim=1
-        )
-        with torch.no_grad():
-            _, H = to_complex(net3(coords))
-        log_hy = np.log(np.abs(H[:, 1].cpu().numpy().astype(np.complex128)) + 1e-30)
-        slope = float(np.polyfit(z.cpu().numpy().astype(np.float64), log_hy, 1)[0])
-        kappa_fit = sign * slope
-        out[f"{name}_fit"] = kappa_fit
-        out[f"{name}_fit_rel_error"] = float(abs(kappa_fit - kappa_ref) / kappa_ref)
-        out[f"{name}_analytical"] = float(kappa_ref)
-        out[f"decay_sign_correct_{side}"] = float(kappa_fit > 0)
-    return out
+    return measurement.fit_decay_constants(
+        net3, kappa_d.real, kappa_m.real,
+        x=x, y=Y_MAX / 2, z_min=Z_MIN, z_max=Z_MAX, guard=guard,
+        n_line=n_line, device=device,
+    )
 
 
 def continuity_residuals(
@@ -791,22 +698,7 @@ def continuity_residuals(
 ) -> Dict[str, float]:
     """Tangential continuity residual at z = ±offset, relative to the field RMS."""
     coords, normals = sample_interface_points(n_points, device=device)
-    with torch.no_grad():
-        E_p, H_p = to_complex(net3(coords + offset * normals))
-        E_m, H_m = to_complex(net3(coords - offset * normals))
-        n = normals.to(E_p.dtype)
-        res_E = torch.linalg.vector_norm(torch.linalg.cross(n, E_p - E_m, dim=1), dim=1)
-        res_H = torch.linalg.vector_norm(torch.linalg.cross(n, H_p - H_m, dim=1), dim=1)
-        E_rms = torch.sqrt(
-            torch.mean(torch.sum(E_p.abs() ** 2 + E_m.abs() ** 2, dim=1) / 2)
-        ).clamp_min(1e-30)
-        H_rms = torch.sqrt(
-            torch.mean(torch.sum(H_p.abs() ** 2 + H_m.abs() ** 2, dim=1) / 2)
-        ).clamp_min(1e-30)
-    return {
-        "continuity_E_rel": (torch.sqrt(torch.mean(res_E**2)) / E_rms).item(),
-        "continuity_H_rel": (torch.sqrt(torch.mean(res_H**2)) / H_rms).item(),
-    }
+    return measurement.continuity_residuals(net3, coords, normals, offset)
 
 
 def validate_at_omega(
@@ -912,16 +804,7 @@ def summarise(per_freq: Dict[str, Dict[str, float]]) -> Dict[str, float]:
 def success_tier(summary: Dict[str, float]) -> str:
     """Tiers: minimum (bound everywhere, rel L2 < 0.5), target (rel L2 < 0.1 and
     k_spp < 1% at every ω), stretch (rel L2 < 0.02 and k_spp < 0.2%)."""
-    rel = summary["worst_rel_l2"]
-    k_err = summary["worst_k_spp_rel_error"]
-    bound = summary["bound_mode_everywhere"] > 0
-    if bound and rel < 0.02 and k_err < 0.002:
-        return "stretch"
-    if bound and rel < 0.1 and k_err < 0.01:
-        return "target"
-    if bound and rel < 0.5:
-        return "minimum"
-    return "not met"
+    return banded_success_tier(summary, stretch=(0.02, 0.002), target=(0.1, 0.01))
 
 
 # --------------------------------------------------------------------------- plots
@@ -1068,39 +951,28 @@ def write_metrics_json(
     run_info: Dict,
 ) -> None:
     """Write the per-frequency metrics, band summary and self-check to JSON."""
-    with open(path, "w") as fh:
-        json.dump(
-            {
-                "per_frequency": per_freq,
-                "summary": summary,
-                "analytical_self_check": self_check,
-                "figures": figures,
-                "run_info": run_info,
-            },
-            fh,
-            indent=2,
-        )
+    write_json_report(path, {
+        "per_frequency": per_freq,
+        "summary": summary,
+        "analytical_self_check": self_check,
+        "figures": figures,
+        "run_info": run_info,
+    })
 
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--epochs", type=int, default=N_EPOCHS)
-    p.add_argument("--n-points", type=int, default=BATCH_SIZE,
-                   help="interior collocation points per epoch (split over 4 sub-frequencies)")
-    p.add_argument("--lr", type=float, default=LEARNING_RATE)
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--device", type=str, default=str(DEVICE))
-    p.add_argument("--lbfgs-steps", type=int, default=LBFGS_STEPS,
-                   help="L-BFGS outer steps after Adam (0 disables)")
-    p.add_argument("--lbfgs-dtype", choices=("float64", "float32"), default="float64")
-    p.add_argument("--resume", action="store_true",
-                   help="warm-start from <model-out>.partial.pth if it exists")
-    p.add_argument("--quick", action="store_true",
-                   help=f"smoke run: {QUICK_EPOCHS} epochs, 512 points, no L-BFGS")
-    p.add_argument("--figures-dir", type=Path, default=FIGURES_DIR)
-    p.add_argument("--model-out", type=Path, default=MODEL_PATH)
+    add_core_args(
+        p, epochs=N_EPOCHS, n_points=BATCH_SIZE, lr=LEARNING_RATE,
+        device=str(DEVICE), lbfgs_steps=LBFGS_STEPS,
+        n_points_help="interior collocation points per epoch "
+                      f"(split over {N_FREQ_SUB} sub-frequencies)",
+    )
+    add_output_args(
+        p, quick_epochs=QUICK_EPOCHS, figures_dir=FIGURES_DIR, model_out=MODEL_PATH,
+    )
     return p.parse_args(argv)
 
 

@@ -49,6 +49,48 @@ a *physical* floor of roughly 8% for a strongly confined silver mode, because
 the exact field genuinely differs across a 4 nm gap. Without the self-check that
 floor would have looked like network error.
 
+## Do the design choices earn their place?
+
+Benchmarks establish that the operators are right. They say nothing about
+whether the *recipe* built on them is necessary. `examples/ablation_study.py`
+removes one ingredient at a time from the single-interface case, every arm on
+an identical schedule and seed:
+
+| removed | relative L2 vs control | amplitude recovered | bound mode |
+|---|---:|---:|:--:|
+| *(control)* | 1.00x | 73% | both sides |
+| boundary anchor | 2.70x | **0.1%** | air only |
+| displacement adapter | 2.30x | 30% | neither |
+| per-medium weighting | 1.87x | 42% | neither |
+| physics-loss ramp | 1.42x | 58% | metal only |
+
+All four earn their place, and only the control recovers a bound mode on both
+sides of the interface — a sharper discriminator than the error norm.
+
+Two findings are worth stating separately.
+
+**A loss curve is not evidence.** The no-anchor arm reaches a final loss
+**31,000 times lower than the control**, descending smoothly throughout, while
+the field it learned is one part in a thousand of the correct amplitude. The
+Maxwell residual really is minimised — by E = H = 0. Any PINN result reported
+without a reference solution should be read with this in mind.
+
+![Training curves for the five ablation arms](assets/ablation_training_curves.png)
+
+The green curve is the run that learned nothing. Each arm minimises its own
+objective, so the levels are not comparable — the shape is the point.
+
+**The adapter's effect is not local.** It was introduced to make the E_z jump
+exact, and removing it does leave that jump essentially unlearned (a ratio of
+1.1 where the exact value is 18.3). But it also degrades the metal-side
+curl-H residual by 5.9x. Getting the discontinuity right by construction makes
+the interior physics tractable, not just the interface.
+
+The caveat, stated plainly: this runs a deliberately shortened schedule, so the
+control here is far from the production result (relative L2 0.37 against
+0.0039). The arms are comparable to each other, not to the headline numbers.
+One case, one frequency, one seed.
+
 ## Reproducing
 
 ```bash

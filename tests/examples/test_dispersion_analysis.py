@@ -1,11 +1,13 @@
 """Tests for examples/dispersion_analysis.py (analytics only, no training)."""
 
 import json
+import math
 
 import numpy as np
 import pytest
 
 from examples import dispersion_analysis as da
+from src.constants import C0
 
 FIGURE_NAMES = [
     "spp_dispersion_silver.png",
@@ -161,6 +163,7 @@ class TestMainEndToEnd:
             "eps_drude",
             "eps_johnson_christy",
             "relative_deviation_vs_jc",
+            "wavelength_nm",
             "n_eff",
             "propagation_length_um",
             "penetration_depth_dielectric_nm",
@@ -170,6 +173,14 @@ class TestMainEndToEnd:
         assert 0.0 <= ag["relative_deviation_vs_jc"] < 0.15
         assert ag["n_eff"] > 1.0
         assert ag["propagation_length_um"] > 0.0
+
+        # The anchor must be evaluated at exactly 633 nm, not snapped to the
+        # nearest sweep grid point, so it does not drift with --n-points.
+        assert ag["wavelength_nm"] == 633.0
+        omega_633 = 2.0 * math.pi * C0 / 633e-9
+        eps_exact = complex(da.drude_permittivity(omega_633))
+        assert ag["eps_drude"][0] == pytest.approx(eps_exact.real, rel=1e-12)
+        assert ag["eps_drude"][1] == pytest.approx(eps_exact.imag, rel=1e-12)
 
         design = on_disk["design_space"]
         assert design["lambda0_nm"] == pytest.approx(633.0)

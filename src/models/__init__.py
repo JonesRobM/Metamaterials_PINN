@@ -6,7 +6,6 @@ specifically designed for solving Maxwell's equations in metamaterial
 systems, particularly for Surface Plasmon Polariton (SPP) modeling.
 """
 
-from .electrostatics_pinn import ElectrostaticsPINN, boundary_loss, laplace_residual
 from .field_format import join_complex, split_complex, to_complex
 from .loss_functions import (
     BaseLoss,
@@ -38,9 +37,6 @@ __all__ = [
     "MetamaterialDeepONet",
     "MultiFrequencyPINN",
     "FourierEMFeatures",
-    "ElectrostaticsPINN",
-    "laplace_residual",
-    "boundary_loss",
     "split_complex",
     "to_complex",
     "join_complex",

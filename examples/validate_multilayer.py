@@ -123,7 +123,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import math
 import sys
@@ -158,6 +157,18 @@ from src.effective_medium import (  # noqa: E402
     drude_permittivity,
     hmm_permittivities,
     omega_from_wavelength,
+)
+from src.experiments import (  # noqa: E402
+    LayeredAdapter,
+    TrainingConfig,
+    add_core_args,
+    add_output_args,
+    load_core_checkpoint,
+    measurement,
+    relative_l2,
+    run_training,
+    write_checkpoint,
+    write_json_report,
 )
 from src.models import (  # noqa: E402
     ElectromagneticPINN,
@@ -622,64 +633,16 @@ class LayeredFourierFeatures(nn.Module):
         return torch.cat(features, dim=1)
 
 
-class LayeredDisplacementAdapter(nn.Module):
-    r"""
-    The displacement adapter with the **stack's** piecewise ``ε_zz(z)``.
-
-    Structurally identical to ``examples/validate_spp.DisplacementAdapter``:
-    channel 2 of the wrapped MLP is the continuous ``D̂_z`` and this module
-    divides it by the local normal permittivity. The only change is that the
-    divisor is now looked up in the real layer profile instead of being one of
-    two constants — which is the whole claim of the experiment, since ``D_z``
-    is continuous across *every* interface (see the module docstring).
-
-    Lookup convention: ``torch.bucketize(..., right=True)`` matches
-    :func:`src.transfer_matrix.layer_index_at`, so a point exactly on an
-    interface takes the medium **above**, as everywhere else in the project.
-
-    The layer table is held as **plain float64/complex128 tensors, deliberately
-    not registered buffers**. ``nn.Module.to(dtype)`` converts complex buffers
-    with the same dtype it is given, so the float64 L-BFGS promotion (and the
-    float32 restore afterwards) would silently rewrite ``ε_Ag = −17.88 + 0.20i``
-    as the real number ``−17.88`` — losing the metal's loss, and with it the
-    imaginary part of ``k_spp`` this experiment exists to measure. The
-    predecessor adapters avoided this by accident, by storing python
-    ``complex`` scalars; here the table is an array, so it is guarded on
-    purpose. Only the device is tracked (lazily, in :meth:`eps_zz`).
-
-    Args:
-        mlp: Core network, ``coords_hat (N, 3) -> (N, 6, 2)``.
-        boundaries_hat: Interface positions in ``k₀``-scaled units.
-        eps_layers: Permittivities in the same increasing-``z`` order.
-    """
-
-    def __init__(
-        self, mlp: nn.Module, boundaries_hat: np.ndarray, eps_layers: Sequence[complex]
-    ):
-        super().__init__()
-        self.mlp = mlp
-        self.boundaries_hat = torch.as_tensor(
-            np.asarray(boundaries_hat), dtype=torch.float64
-        )
-        self.eps_values = torch.as_tensor(
-            np.asarray([complex(e) for e in eps_layers], dtype=complex), dtype=torch.complex128
-        )
-
-    def eps_zz(self, z_hat: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-        """``ε_zz`` at each scaled ``z``, as a complex tensor of ``dtype``."""
-        bounds = self.boundaries_hat.to(z_hat.device)
-        idx = torch.bucketize(
-            z_hat.detach().to(torch.float64).contiguous(), bounds, right=True
-        )
-        return self.eps_values.to(z_hat.device)[idx].to(dtype)
-
-    def forward(self, coords: torch.Tensor) -> torch.Tensor:
-        out = self.mlp(coords)  # [N, 6, 2]; channel 2 carries D̂_z
-        fields = torch.complex(out[..., 0], out[..., 1])
-        eps = self.eps_zz(coords[:, 2], fields.dtype)
-        e_z = fields[:, 2] / eps
-        fields = torch.cat([fields[:, :2], e_z.unsqueeze(1), fields[:, 3:]], dim=1)
-        return torch.stack([fields.real, fields.imag], dim=-1)
+#: The displacement adapter with the **stack's** piecewise ``ε_zz(z)``.
+#:
+#: The same construction as the single-interface run, with the divisor looked up
+#: in the real layer profile instead of being one of two constants — which is
+#: the whole claim of the experiment, since ``D_z`` is continuous across *every*
+#: interface (see the module docstring). :class:`src.experiments.LayeredAdapter`
+#: carries the details, including why its ε table is deliberately not a
+#: registered buffer: the float64 L-BFGS promotion would strip ``Im ε_Ag``, and
+#: with it the imaginary part of ``k_spp`` this experiment exists to measure.
+LayeredDisplacementAdapter = LayeredAdapter
 
 
 class MultilayerCore(nn.Module):
@@ -911,23 +874,9 @@ def _material_masks(coords_hat: torch.Tensor, struct: Structure) -> Dict[str, to
     }
 
 
-def _write_checkpoint(path: Path, state: dict, loss: float, phase: str) -> None:
-    """Atomically save the best weights so far (rename is atomic on POSIX)."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    torch.save(
-        {"state_dict": {k: v.cpu() for k, v in state.items()}, "best_loss": loss, "phase": phase},
-        tmp,
-    )
-    tmp.replace(path)
-
-
-def load_checkpoint_into(network: MultilayerPINN, path: Path) -> float:
-    """Load core weights from a training checkpoint; returns its recorded loss."""
-    blob = torch.load(Path(path), map_location="cpu", weights_only=False)
-    network.core.load_state_dict(blob["state_dict"])
-    return float(blob.get("best_loss", float("nan")))
+#: Atomic best-weights checkpointing (see :func:`src.experiments.write_checkpoint`).
+_write_checkpoint = write_checkpoint
+load_checkpoint_into = load_core_checkpoint
 
 
 def probe_representability(
@@ -1029,11 +978,11 @@ def train(
     curl-H residual penalises an Ê error in silver ``|ε_Ag|² ≈ 320×`` harder than
     in air, and without the reweighting Adam falls into the trivial ``E = H = 0``
     basin). Tangential continuity is imposed on *all* interfaces, and the soft
-    Dirichlet anchor on the six faces is the **TMM** profile. Phase 2 is a
-    float64 L-BFGS refinement on a fixed collocation set with the silver curl
-    weight raised to ``|ε_Ag|^{-1/2}``.
+    Dirichlet anchor on the six faces is the **TMM** profile. Phase 2 raises the
+    silver curl weight to ``|ε_Ag|^{-1/2}``.
 
-    Returns the network with its best iterate restored, and the loss history.
+    The schedule around the physics — ramp, best-iterate tracking, float64
+    L-BFGS, checkpointing — is :func:`src.experiments.run_training`.
     """
     struct = struct or STRUCT
     core = network.core
@@ -1045,20 +994,6 @@ def train(
     w_curl_lbfgs = abs(EPS_AG) ** -METAL_CURL_EXPONENT_LBFGS
     w_div_metal = abs(EPS_AG) ** -METAL_DIV_EXPONENT
     eps_by_group = (EPS_AG, complex(EPS_D2), complex(EPS_AIR))
-
-    optimizer = torch.optim.Adam(core.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(1, n_epochs), eta_min=learning_rate * 1e-2
-    )
-    history: Dict[str, list] = {
-        "epoch": [], "total": [], "curl": [], "div": [], "continuity": [], "boundary": [], "lr": [],
-    }
-    best_loss = float("inf")
-    best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-
-    n_boundary = max(6, n_points // 2)
-    n_interface = max(1, n_points // 4)
-    ramp_epochs = max(1, int(physics_ramp_frac * n_epochs))
 
     def compute_losses(batch, ramp: float = 1.0, w_curl_m: Optional[float] = None):
         if w_curl_m is None:
@@ -1085,7 +1020,7 @@ def train(
         )
         return total, l_curl, l_div, l_cont, l_bc
 
-    def sample_all(n_int, n_bc, n_if, dtype=torch.float32):
+    def sample_batch(n_int, n_bc, n_if, dtype=torch.float32):
         coords = sample_collocation_hat(n_int, struct, device=device).detach().to(dtype)
         masks = _material_masks(coords, struct)
         batch = {
@@ -1102,100 +1037,31 @@ def train(
         batch["zero"] = torch.zeros((), dtype=dtype, device=device)
         return batch
 
-    core.train()
-    t0 = time.perf_counter()
-    for epoch in range(n_epochs):
-        batch = sample_all(n_points, n_boundary, n_interface)
-        ramp = min(1.0, (epoch + 1) / ramp_epochs)
-        optimizer.zero_grad(set_to_none=True)
-        loss, l_curl, l_div, l_cont, l_bc = compute_losses(batch, ramp=ramp)
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
-
-        loss_val = loss.item()
-        history["epoch"].append(epoch)
-        history["total"].append(loss_val)
-        history["curl"].append(l_curl.item())
-        history["div"].append(l_div.item())
-        history["continuity"].append(l_cont.item())
-        history["boundary"].append(l_bc.item())
-        history["lr"].append(optimizer.param_groups[0]["lr"])
-
-        if ramp >= 1.0 and loss_val < best_loss and math.isfinite(loss_val):
-            best_loss = loss_val
-            best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-        if checkpoint_path is not None and epoch % log_every == 0 and math.isfinite(best_loss):
-            _write_checkpoint(checkpoint_path, best_state, best_loss, f"adam:{epoch}")
-
-        if epoch % log_every == 0 or epoch == n_epochs - 1:
-            logger.info(
-                "epoch %5d | total %.3e | curl %.3e | div %.3e | cont %.3e | bc %.3e | "
-                "lr %.2e | %.0fs",
-                epoch, loss_val, l_curl.item(), l_div.item(), l_cont.item(), l_bc.item(),
-                optimizer.param_groups[0]["lr"], time.perf_counter() - t0,
-            )
-
-    if lbfgs_steps > 0:
-        core.load_state_dict(best_state)
-        if lbfgs_dtype == torch.float64:
-            core.to(torch.float64)
-            logger.info("L-BFGS phase in float64")
-        batch = sample_all(
-            LBFGS_POINTS_FACTOR * n_points,
-            LBFGS_POINTS_FACTOR * n_boundary,
-            LBFGS_POINTS_FACTOR * n_interface,
-            dtype=lbfgs_dtype,
-        )
-        lbfgs = torch.optim.LBFGS(
-            core.parameters(), lr=1.0, max_iter=20, history_size=50,
-            tolerance_grad=1e-12, tolerance_change=1e-14, line_search_fn="strong_wolfe",
-        )
-        parts: Dict[str, float] = {}
-
-        def closure() -> torch.Tensor:
-            lbfgs.zero_grad(set_to_none=True)
-            loss, l_curl, l_div, l_cont, l_bc = compute_losses(batch, w_curl_m=w_curl_lbfgs)
-            loss.backward()
-            parts.update(
-                curl=l_curl.item(), div=l_div.item(), cont=l_cont.item(), bc=l_bc.item()
-            )
-            return loss
-
-        for step in range(lbfgs_steps):
-            loss_val = float(lbfgs.step(closure).detach())
-            history["epoch"].append(n_epochs + step)
-            history["total"].append(loss_val)
-            history["curl"].append(parts["curl"])
-            history["div"].append(parts["div"])
-            history["continuity"].append(parts["cont"])
-            history["boundary"].append(parts["bc"])
-            history["lr"].append(float("nan"))
-            if loss_val < best_loss and math.isfinite(loss_val):
-                best_loss = loss_val
-                best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-                if checkpoint_path is not None:
-                    _write_checkpoint(checkpoint_path, best_state, best_loss, f"lbfgs:{step}")
-            logger.info(
-                "lbfgs %3d | total %.3e | curl %.3e | div %.3e | cont %.3e | bc %.3e | %.0fs",
-                step, loss_val, parts["curl"], parts["div"], parts["cont"], parts["bc"],
-                time.perf_counter() - t0,
-            )
-            if not math.isfinite(loss_val):
-                logger.warning("L-BFGS produced a non-finite loss; stopping refinement")
-                break
-
-    core.load_state_dict(best_state)
-    network.to(torch.float32)
-    logger.info("restored best weights (loss %.3e)", best_loss)
-    return network, history
+    return run_training(
+        network,
+        TrainingConfig(
+            n_epochs=n_epochs,
+            n_points=n_points,
+            n_boundary=max(6, n_points // 2),
+            n_interface=max(1, n_points // 4),
+            learning_rate=learning_rate,
+            physics_ramp_frac=physics_ramp_frac,
+            lbfgs_steps=lbfgs_steps,
+            lbfgs_dtype=lbfgs_dtype,
+            lbfgs_points_factor=LBFGS_POINTS_FACTOR,
+            log_every=log_every,
+        ),
+        sample_batch,
+        compute_losses,
+        logger,
+        lbfgs_loss_kwargs={"w_curl_m": w_curl_lbfgs},
+        checkpoint_path=checkpoint_path,
+    )
 
 
 # ================================================================== validation
-def _relative_l2(pred: torch.Tensor, ref: torch.Tensor) -> float:
-    return (
-        torch.linalg.vector_norm(pred - ref) / torch.linalg.vector_norm(ref).clamp_min(1e-30)
-    ).item()
+#: ``‖pred − ref‖ / ‖ref‖`` — see :func:`src.experiments.relative_l2`.
+_relative_l2 = relative_l2
 
 
 K_PROBE_HEIGHTS = tuple(np.linspace(0.05, 0.95, 20))
@@ -1423,22 +1289,7 @@ def continuity_residuals(
     coords_hat, normals = sample_interface_hat(n_points, struct, device=device)
     coords = coords_hat / K0
     off = offset
-    with torch.no_grad():
-        E_p, H_p = to_complex(net3(coords + off * normals))
-        E_m, H_m = to_complex(net3(coords - off * normals))
-        n = normals.to(E_p.dtype)
-        res_E = torch.linalg.vector_norm(torch.linalg.cross(n, E_p - E_m, dim=1), dim=1)
-        res_H = torch.linalg.vector_norm(torch.linalg.cross(n, H_p - H_m, dim=1), dim=1)
-        E_rms = torch.sqrt(
-            torch.mean(torch.sum(E_p.abs() ** 2 + E_m.abs() ** 2, dim=1) / 2)
-        ).clamp_min(1e-30)
-        H_rms = torch.sqrt(
-            torch.mean(torch.sum(H_p.abs() ** 2 + H_m.abs() ** 2, dim=1) / 2)
-        ).clamp_min(1e-30)
-    return {
-        "continuity_E_rel": (torch.sqrt(torch.mean(res_E**2)) / E_rms).item(),
-        "continuity_H_rel": (torch.sqrt(torch.mean(res_H**2)) / H_rms).item(),
-    }
+    return measurement.continuity_residuals(net3, coords, normals, off)
 
 
 def validate(
@@ -1819,28 +1670,23 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--epochs", type=int, default=N_EPOCHS)
-    p.add_argument("--n-points", type=int, default=BATCH_SIZE)
-    p.add_argument("--lr", type=float, default=LEARNING_RATE)
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--device", type=str, default=str(DEVICE))
-    p.add_argument("--lbfgs-steps", type=int, default=LBFGS_STEPS)
-    p.add_argument("--lbfgs-dtype", choices=("float64", "float32"), default="float64")
+    add_core_args(
+        p, epochs=N_EPOCHS, n_points=BATCH_SIZE, lr=LEARNING_RATE,
+        device=str(DEVICE), lbfgs_steps=LBFGS_STEPS,
+    )
     p.add_argument("--period-nm", type=float, default=PERIOD * 1e9)
     p.add_argument("--n-periods", type=int, default=N_PERIODS)
     p.add_argument("--probe-epochs", type=int, default=PROBE_EPOCHS)
     p.add_argument("--probe-only", action="store_true",
                    help="run the tractability probe and stop")
     p.add_argument("--skip-probe", action="store_true")
-    p.add_argument("--resume", action="store_true",
-                   help="warm-start from <model-out>.partial.pth if it exists")
     p.add_argument("--eval-only", action="store_true",
                    help="load <model-out> (or its .partial.pth) and re-run validation, "
                         "figures and metrics.json without training")
-    p.add_argument("--quick", action="store_true",
-                   help=f"smoke run: {QUICK_EPOCHS} epochs, 512 points, no L-BFGS, tiny probe")
-    p.add_argument("--figures-dir", type=Path, default=FIGURES_DIR)
-    p.add_argument("--model-out", type=Path, default=MODEL_PATH)
+    add_output_args(
+        p, quick_epochs=QUICK_EPOCHS, figures_dir=FIGURES_DIR, model_out=MODEL_PATH,
+        quick_extra=", tiny probe",
+    )
     return p.parse_args(argv)
 
 
@@ -2009,26 +1855,21 @@ def main(argv=None) -> Dict:
     )
     args.figures_dir.mkdir(parents=True, exist_ok=True)
     probe_record = {k: v for k, v in probe.items() if k != "probe_history"}
-    with open(args.figures_dir / "metrics.json", "w") as fh:
-        json.dump(
-            {
-                "structure": info,
-                "resolution": resolution,
-                "probe": probe_record,
-                "metrics": metrics,
-                "tmm_self_check": self_check,
-                "emt_baseline": emt_check,
-                "figures": figures,
-                "run_info": {
-                    "epochs": n_epochs, "n_points": n_points, "lbfgs_steps": lbfgs_steps,
-                    "lbfgs_dtype": args.lbfgs_dtype, "seed": args.seed,
-                    "quick": bool(args.quick), "device": str(device),
-                    "eval_only": bool(args.eval_only),
-                },
-            },
-            fh,
-            indent=2,
-        )
+    write_json_report(args.figures_dir / "metrics.json", {
+        "structure": info,
+        "resolution": resolution,
+        "probe": probe_record,
+        "metrics": metrics,
+        "tmm_self_check": self_check,
+        "emt_baseline": emt_check,
+        "figures": figures,
+        "run_info": {
+            "epochs": n_epochs, "n_points": n_points, "lbfgs_steps": lbfgs_steps,
+            "lbfgs_dtype": args.lbfgs_dtype, "seed": args.seed,
+            "quick": bool(args.quick), "device": str(device),
+            "eval_only": bool(args.eval_only),
+        },
+    })
     logger.info("saved model to %s, figures + metrics.json to %s", args.model_out,
                 args.figures_dir)
     logger.info(

@@ -104,6 +104,16 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.analytical import analytical_spp_fields, complex_to_pinn_format  # noqa: E402
 from src.constants import C0, EPS0, ETA0, MU0  # noqa: E402
+from src.experiments import (  # noqa: E402
+    TrainingConfig,
+    TwoMediumAdapter,
+    add_core_args,
+    add_output_args,
+    measurement,
+    relative_l2,
+    run_training,
+    write_json_report,
+)
 from src.models import (  # noqa: E402
     ElectromagneticPINN,
     MaxwellCurlLoss,
@@ -144,10 +154,17 @@ N_EPOCHS = 4000
 LEARNING_RATE = 1e-3
 # The plane-wave example used boundary weight 10 with no ramp; here the
 # metal-side curl-H residual is stiff (|2π ε_m| ≈ 115 penalty factor on Ê
-# errors for |ε_m| = 18.3), so with full physics from epoch 0 Adam collapses
-# to the trivial E = H = 0 minimiser and never fits the anchor (verified:
-# a weight-10 run plateaued at boundary MSE ≈ the anchor's mean square for
-# 4000 epochs, rel L2 ≈ 1). Cure: stronger anchor + a physics-loss ramp.
+# errors for |ε_m| = 18.3), so with full physics from epoch 0 and a *weak*
+# anchor Adam collapses to the trivial E = H = 0 minimiser and never fits it
+# (verified: a weight-10 run plateaued at boundary MSE ≈ the anchor's mean
+# square for 4000 epochs, rel L2 ≈ 1). Cure: stronger anchor + a physics ramp.
+#
+# Note on attribution, from examples/ablation_study.py: that collapse is a
+# property of the ramp-and-weak-anchor *combination*, not of the ramp alone.
+# At this weight of 100, removing the ramp does not collapse the field — it
+# degrades rel L2 by 1.42x, the mildest of the four ablated choices. The
+# anchor is what prevents collapse (removing it gives 0.1% of the correct
+# amplitude), and the ramp is a convergence aid on top of it.
 BOUNDARY_WEIGHT = 100.0
 DIVERGENCE_WEIGHT = 1.0
 CONTINUITY_WEIGHT = 1.0
@@ -209,7 +226,7 @@ def configure_case(case: str) -> None:
 
     # eps_parallel is the component along the optical axis = ε_n for axis 'z'.
     _MATERIAL = MetamaterialProperties(EPS_METAL_N, EPS_METAL_T, "z", omega=OMEGA)
-    K_SPP, KAPPA_D, KAPPA_M = _MATERIAL._decay_constants(OMEGA, EPS_DIEL, "x")
+    K_SPP, KAPPA_D, KAPPA_M = _MATERIAL.decay_constants(OMEGA, EPS_DIEL, "x")
     LAMBDA_SPP = 2 * np.pi / K_SPP.real
     DELTA_D = 1.0 / KAPPA_D.real  # penetration into the dielectric
     DELTA_M = 1.0 / KAPPA_M.real  # penetration into the metal/metamaterial
@@ -267,43 +284,16 @@ class AnalyticalSPP(nn.Module):
 
 
 # --------------------------------------------------------------------------- network
-class DisplacementAdapter(nn.Module):
-    """
-    Dimensionless field network with the interface's E_z discontinuity built in.
-
-    The physical mode has ``E_z`` jumping at z = 0 while the normal
-    displacement ``D_z = ε₀ ε_zz E_z`` is continuous; a continuous MLP cannot
-    represent the jump, and its smoothed version fights the divergence/curl
-    losses exactly where the sampling is densest. The wrapped MLP therefore
-    represents the *continuous* quantity D̂_z on channel 2, and this adapter
-    divides it by the local zz permittivity component per point, so
-    ``forward(coords_hat)`` returns genuine ``(Ê, Ĥ)`` in the ``[N, 6, 2]``
-    layout with the exact jump. All losses see this module.
-
-    ``eps_below`` must be the **normal** (zz) component of the lower medium —
-    ε_m for isotropic silver, ε_n (not ε_t) for the uniaxial case — because
-    D_z couples only to ε_zz. The values are kept as python complex and cast
-    to the working dtype per forward, so ``.to(float64)`` conversions of the
-    module are safe.
-    """
-
-    def __init__(self, mlp: nn.Module, eps_below: complex, eps_above: complex):
-        super().__init__()
-        self.mlp = mlp
-        self.eps_below = complex(eps_below)
-        self.eps_above = complex(eps_above)
-
-    def forward(self, coords: torch.Tensor) -> torch.Tensor:
-        out = self.mlp(coords)  # [N, 6, 2]; channel 2 carries D̂_z
-        fields = torch.complex(out[..., 0], out[..., 1])  # [N, 6]
-        eps = torch.where(
-            coords[:, 2] < 0,
-            torch.tensor(self.eps_below, dtype=fields.dtype, device=fields.device),
-            torch.tensor(self.eps_above, dtype=fields.dtype, device=fields.device),
-        )
-        e_z = fields[:, 2] / eps
-        fields = torch.cat([fields[:, :2], e_z.unsqueeze(1), fields[:, 3:]], dim=1)
-        return torch.stack([fields.real, fields.imag], dim=-1)
+#: The interface's ``E_z`` discontinuity, built in exactly.
+#:
+#: The wrapped MLP represents the *continuous* normal displacement ``D̂_z`` on
+#: channel 2 and :class:`~src.experiments.adapter.TwoMediumAdapter` divides it
+#: by the local ``ε_zz``, so the jump is exact rather than something a
+#: continuous network has to approximate against the divergence and curl
+#: losses. ``eps_below`` is the **normal** (zz) component of the lower medium —
+#: ε_m for isotropic silver, ε_n (*not* ε_t) for the uniaxial case, because
+#: ``D_z`` couples only to ε_zz. See :mod:`src.experiments.adapter`.
+DisplacementAdapter = TwoMediumAdapter
 
 
 class SPPPINN(nn.Module):
@@ -473,23 +463,18 @@ def train(
     (piecewise ε) in the interior, tangential continuity across z = 0, and a
     soft Dirichlet (analytical-mode) term on the six boundary faces.
 
-    The interior physics terms (curl, divergence, continuity) are multiplied
-    by a ramp ``min(1, epoch / (physics_ramp_frac * n_epochs))`` so the anchor
-    establishes the mode's amplitude before the stiff metal-side curl term can
-    pin the network in the trivial E = H = 0 basin (see the note at
-    ``BOUNDARY_WEIGHT``). The logged history stores the *unramped* component
-    values; ``total`` is the ramped training objective.
+    This is the physics; the Adam → float64-L-BFGS schedule around it, the
+    physics-loss ramp and the best-iterate tracking are
+    :func:`src.experiments.run_training`. The ramp matters here in particular:
+    without it the stiff metal-side curl term pins the network in the trivial
+    E = H = 0 basin before the anchor has established the mode's amplitude
+    (see the note at ``BOUNDARY_WEIGHT``).
 
-    Phase 1: ``n_epochs`` of Adam (cosine-annealed LR) on freshly sampled
-    points, metal curl weight ``METAL_CURL_WEIGHT_ADAM`` (anti-collapse).
-    Phase 2 (if ``lbfgs_steps > 0``): L-BFGS refinement (full physics weight,
-    metal curl weight raised to ``METAL_CURL_WEIGHT_LBFGS``)
-    on a fixed set of ``LBFGS_POINTS_FACTOR * n_points`` interior points; each
-    outer step runs up to 20 function evaluations with strong-Wolfe line
-    search. When ``lbfgs_dtype`` is float64 the network, collocation set and
-    anchor targets are promoted to double precision for this phase (float32
-    was the plane-wave experiment's residual floor) and the network is
-    converted back to float32 at the end.
+    Phase 1 samples fresh points each epoch with metal curl weight
+    ``METAL_CURL_WEIGHT_ADAM`` (anti-collapse); phase 2 refines on a fixed set
+    of ``LBFGS_POINTS_FACTOR * n_points`` interior points with the metal curl
+    weight raised to ``METAL_CURL_WEIGHT_LBFGS`` — collapse is no longer a risk
+    once the mode is established, so the metal term can be pressed harder.
 
     Returns the network (weights restored to the lowest-loss iterate) and a
     history dict with ``epoch``, ``total``, ``curl``, ``div``, ``continuity``,
@@ -502,29 +487,11 @@ def train(
     cont_loss = TangentialContinuityLoss(offset=CONTINUITY_OFFSET / LAMBDA0)
     eps_m_diag = metal_eps_diag()
 
-    optimizer = torch.optim.Adam(core.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=max(1, n_epochs), eta_min=learning_rate * 1e-2
-    )
-
-    history: Dict[str, list] = {
-        "epoch": [], "total": [], "curl": [], "div": [], "continuity": [], "boundary": [], "lr": [],
-    }
-    best_loss = float("inf")
-    best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-
-    n_boundary = max(6, n_points // 2)
-    n_interface = max(1, n_points // 4)
-
-    ramp_epochs = max(1, int(physics_ramp_frac * n_epochs))
-
-    def compute_losses(
-        coords_air, coords_metal, iface_hat, normals, boundary_hat, target_hat,
-        ramp=1.0, w_curl_m=None,
-    ):
+    def compute_losses(batch, ramp=1.0, w_curl_m=None):
         # Per-medium interior losses; the metal side is preconditioned by a
         # phase-dependent curl weight and METAL_DIV_WEIGHT (see the exponent
         # constants): Adam uses the anti-collapse 1/|ε|, L-BFGS 1/√|ε|.
+        coords_air, coords_metal, iface_hat, normals, boundary_hat, target_hat = batch
         if w_curl_m is None:
             w_curl_m = METAL_CURL_WEIGHT_ADAM
         l_curl = curl_loss.compute(
@@ -547,7 +514,7 @@ def train(
         )
         return total, l_curl, l_div, l_cont, l_bc
 
-    def sample_all(n_int, n_bc, n_if, dtype=torch.float32):
+    def sample_batch(n_int, n_bc, n_if, dtype=torch.float32):
         coords_hat = (
             (sample_collocation_points(n_int, device=device) / LAMBDA0).detach().to(dtype)
         )
@@ -562,100 +529,30 @@ def train(
             target_hat = analytical_fields_hat(boundary_hat)
         return coords_air, coords_metal, iface_hat, normals, boundary_hat, target_hat
 
-    core.train()
-    t0 = time.perf_counter()
-    for epoch in range(n_epochs):
-        batch = sample_all(n_points, n_boundary, n_interface)
-        ramp = min(1.0, (epoch + 1) / ramp_epochs)
-        optimizer.zero_grad(set_to_none=True)
-        loss, l_curl, l_div, l_cont, l_bc = compute_losses(*batch, ramp=ramp)
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
-
-        loss_val = loss.item()
-        history["epoch"].append(epoch)
-        history["total"].append(loss_val)
-        history["curl"].append(l_curl.item())
-        history["div"].append(l_div.item())
-        history["continuity"].append(l_cont.item())
-        history["boundary"].append(l_bc.item())
-        history["lr"].append(optimizer.param_groups[0]["lr"])
-
-        # Totals from partially ramped epochs are not comparable to the full
-        # objective, so track the best iterate only once the ramp is complete.
-        if ramp >= 1.0 and loss_val < best_loss and math.isfinite(loss_val):
-            best_loss = loss_val
-            best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-
-        if epoch % log_every == 0 or epoch == n_epochs - 1:
-            logger.info(
-                "epoch %5d | total %.3e | curl %.3e | div %.3e | cont %.3e | bc %.3e | lr %.2e | %.0fs",
-                epoch, loss_val, l_curl.item(), l_div.item(), l_cont.item(), l_bc.item(),
-                optimizer.param_groups[0]["lr"], time.perf_counter() - t0,
-            )
-
-    if lbfgs_steps > 0:
-        core.load_state_dict(best_state)
-        if lbfgs_dtype == torch.float64:
-            core.to(torch.float64)
-            logger.info("L-BFGS phase in float64")
-        batch = sample_all(
-            LBFGS_POINTS_FACTOR * n_points,
-            LBFGS_POINTS_FACTOR * n_boundary,
-            LBFGS_POINTS_FACTOR * n_interface,
-            dtype=lbfgs_dtype,
-        )
-        lbfgs = torch.optim.LBFGS(
-            core.parameters(), lr=1.0, max_iter=20, history_size=50,
-            tolerance_grad=1e-12, tolerance_change=1e-14, line_search_fn="strong_wolfe",
-        )
-        parts: Dict[str, float] = {}
-
-        def closure() -> torch.Tensor:
-            lbfgs.zero_grad(set_to_none=True)
-            loss, l_curl, l_div, l_cont, l_bc = compute_losses(
-                *batch, w_curl_m=METAL_CURL_WEIGHT_LBFGS
-            )
-            loss.backward()
-            parts.update(
-                curl=l_curl.item(), div=l_div.item(), cont=l_cont.item(), bc=l_bc.item()
-            )
-            return loss
-
-        for step in range(lbfgs_steps):
-            loss_val = float(lbfgs.step(closure).detach())
-            epoch = n_epochs + step
-            history["epoch"].append(epoch)
-            history["total"].append(loss_val)
-            history["curl"].append(parts["curl"])
-            history["div"].append(parts["div"])
-            history["continuity"].append(parts["cont"])
-            history["boundary"].append(parts["bc"])
-            history["lr"].append(float("nan"))
-            if loss_val < best_loss and math.isfinite(loss_val):
-                best_loss = loss_val
-                best_state = {k: v.detach().clone() for k, v in core.state_dict().items()}
-            logger.info(
-                "lbfgs %3d | total %.3e | curl %.3e | div %.3e | cont %.3e | bc %.3e | %.0fs",
-                step, loss_val, parts["curl"], parts["div"], parts["cont"], parts["bc"],
-                time.perf_counter() - t0,
-            )
-            if not math.isfinite(loss_val):
-                logger.warning("L-BFGS produced a non-finite loss; stopping refinement")
-                break
-
-    core.load_state_dict(best_state)
-    network.to(torch.float32)  # evaluation/serialisation dtype; no-op for float32 phases
-    logger.info("restored best weights (loss %.3e)", best_loss)
-    return network, history
+    return run_training(
+        network,
+        TrainingConfig(
+            n_epochs=n_epochs,
+            n_points=n_points,
+            n_boundary=max(6, n_points // 2),
+            n_interface=max(1, n_points // 4),
+            learning_rate=learning_rate,
+            physics_ramp_frac=physics_ramp_frac,
+            lbfgs_steps=lbfgs_steps,
+            lbfgs_dtype=lbfgs_dtype,
+            lbfgs_points_factor=LBFGS_POINTS_FACTOR,
+            log_every=log_every,
+        ),
+        sample_batch,
+        compute_losses,
+        logger,
+        lbfgs_loss_kwargs={"w_curl_m": METAL_CURL_WEIGHT_LBFGS},
+    )
 
 
 # --------------------------------------------------------------------------- validation
-def _relative_l2(pred: torch.Tensor, ref: torch.Tensor) -> float:
-    return (
-        torch.linalg.vector_norm(pred - ref) / torch.linalg.vector_norm(ref).clamp_min(1e-30)
-    ).item()
+#: ``‖pred − ref‖ / ‖ref‖`` — see :func:`src.experiments.relative_l2`.
+_relative_l2 = relative_l2
 
 
 def _line_along_x(z: float, n: int, device: torch.device) -> torch.Tensor:
@@ -695,25 +592,11 @@ def fit_decay_constants(
     """
     if x is None:
         x = 0.25 * X_MAX
-    out: Dict[str, float] = {}
-    for side, z_lo, z_hi, kappa_ref, sign, name in [
-        ("air", guard, 0.9 * Z_MAX, KAPPA_D.real, -1.0, "kappa_d"),
-        ("metal", 0.95 * Z_MIN, -guard, KAPPA_M.real, 1.0, "kappa_m"),
-    ]:
-        z = torch.linspace(z_lo, z_hi, n_line, device=device)
-        coords = torch.stack(
-            [torch.full_like(z, x), torch.full_like(z, Y_MAX / 2), z], dim=1
-        )
-        with torch.no_grad():
-            _, H = to_complex(network(coords))
-        log_hy = np.log(np.abs(H[:, 1].cpu().numpy().astype(np.complex128)) + 1e-30)
-        slope = float(np.polyfit(z.cpu().numpy().astype(np.float64), log_hy, 1)[0])
-        kappa_fit = sign * slope
-        out[f"{name}_fit"] = kappa_fit
-        out[f"{name}_fit_rel_error"] = float(abs(kappa_fit - kappa_ref) / kappa_ref)
-        out[f"{name}_analytical"] = float(kappa_ref)
-        out[f"decay_sign_correct_{side}"] = float(kappa_fit > 0)
-    return out
+    return measurement.fit_decay_constants(
+        network, KAPPA_D.real, KAPPA_M.real,
+        x=x, y=Y_MAX / 2, z_min=Z_MIN, z_max=Z_MAX, guard=guard,
+        n_line=n_line, device=device,
+    )
 
 
 def continuity_residuals(
@@ -722,22 +605,7 @@ def continuity_residuals(
 ) -> Dict[str, float]:
     """Tangential continuity residual at z = ±offset, relative to the field RMS."""
     coords, normals = sample_interface_points(n_points, device=device)
-    with torch.no_grad():
-        E_p, H_p = to_complex(network(coords + offset * normals))
-        E_m, H_m = to_complex(network(coords - offset * normals))
-        n = normals.to(E_p.dtype)
-        res_E = torch.linalg.vector_norm(torch.linalg.cross(n, E_p - E_m, dim=1), dim=1)
-        res_H = torch.linalg.vector_norm(torch.linalg.cross(n, H_p - H_m, dim=1), dim=1)
-        E_rms = torch.sqrt(
-            torch.mean(torch.sum(E_p.abs() ** 2 + E_m.abs() ** 2, dim=1) / 2)
-        ).clamp_min(1e-30)
-        H_rms = torch.sqrt(
-            torch.mean(torch.sum(H_p.abs() ** 2 + H_m.abs() ** 2, dim=1) / 2)
-        ).clamp_min(1e-30)
-    return {
-        "continuity_E_rel": (torch.sqrt(torch.mean(res_E**2)) / E_rms).item(),
-        "continuity_H_rel": (torch.sqrt(torch.mean(res_H**2)) / H_rms).item(),
-    }
+    return measurement.continuity_residuals(network, coords, normals, offset)
 
 
 def validate(
@@ -987,8 +855,7 @@ def write_metrics_json(
     if "metrics" in data and not any(k in data for k in CASES):
         data = {"silver": data}
     data[case] = {"metrics": metrics, "analytical_reference": ref_metrics, "figures": figures}
-    with open(path, "w") as fh:
-        json.dump(data, fh, indent=2)
+    write_json_report(path, data)
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -996,16 +863,15 @@ def parse_args(argv=None) -> argparse.Namespace:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--case", choices=sorted(CASES), default="silver", help="material case")
-    p.add_argument("--epochs", type=int, default=N_EPOCHS)
-    p.add_argument("--n-points", type=int, default=BATCH_SIZE, help="interior collocation points per epoch")
-    p.add_argument("--lr", type=float, default=LEARNING_RATE)
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--device", type=str, default=str(DEVICE))
-    p.add_argument("--lbfgs-steps", type=int, default=LBFGS_STEPS, help="L-BFGS outer steps after Adam (0 disables)")
-    p.add_argument("--lbfgs-dtype", choices=("float64", "float32"), default="float64", help="precision of the L-BFGS refinement phase")
-    p.add_argument("--quick", action="store_true", help=f"smoke run: {QUICK_EPOCHS} epochs, 512 points, no L-BFGS")
-    p.add_argument("--figures-dir", type=Path, default=FIGURES_DIR)
-    p.add_argument("--model-out", type=Path, default=None, help="checkpoint path (default: per-case under artifacts/models)")
+    add_core_args(
+        p, epochs=N_EPOCHS, n_points=BATCH_SIZE, lr=LEARNING_RATE,
+        device=str(DEVICE), lbfgs_steps=LBFGS_STEPS,
+    )
+    # No --resume: this run is short enough to restart rather than warm-start.
+    add_output_args(
+        p, quick_epochs=QUICK_EPOCHS, figures_dir=FIGURES_DIR, model_out=None,
+        resume=False,
+    )
     return p.parse_args(argv)
 
 

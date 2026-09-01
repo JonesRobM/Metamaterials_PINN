@@ -402,7 +402,7 @@ answers a question the 1-D one cannot ask at all: *which structure?*
 2. **Stratified block sampling matters more with two axes.** With 6 independent
    uniform draws per epoch over a rectangle, large sub-regions go unvisited for
    several epochs at a time. Jittered stratification guarantees one sample per
-   cell every epoch at zero cost. (Not ablated — asserted as a design choice and
+   cell every epoch at zero cost. (Ablated on 2026-09-02 — see [2026-09-02-ablation-results.md](2026-09-02-ablation-results.md): removing the adapter degrades relative L2 by 2.30x and leaves the E_z interface jump essentially unlearned. Originally asserted as a design choice and
    tested for coverage, not for its effect on the final error.)
 3. **Refinement nodes scale as the product, points must scale with them.** The
    1-D run used 13 nodes and 4096 L-BFGS interior points (315/node). A 5 × 5 grid

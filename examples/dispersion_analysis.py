@@ -638,9 +638,19 @@ def _finite_range(values: np.ndarray) -> list[float]:
 
 def build_summary(silver: dict, maps: dict, cut: dict, n_points: int) -> dict:
     """Key numbers of the three studies, JSON-serialisable."""
-    i633 = int(np.argmin(np.abs(silver["wavelength"] - 633e-9)))
-    eps_633 = silver["eps"][i633]
+    # Evaluate the Johnson & Christy anchor at *exactly* 633 nm rather than at
+    # the nearest point of the sweep grid. Snapping made this block both
+    # mislabelled (the nearest grid point is 634.0 nm at the default
+    # resolution) and dependent on --n-points, which is no way to report a
+    # reference value.
+    omega_633 = 2.0 * math.pi * C0 / 633e-9
+    eps_633 = complex(drude_permittivity(omega_633))
     rel_dev = abs(eps_633 - EPS_AG_JC_633NM) / abs(EPS_AG_JC_633NM)
+    anchor = bound_mode_metrics(
+        MetamaterialProperties(eps_633, eps_633, "z", omega=omega_633)
+    )
+    if anchor is None:  # pragma: no cover - silver at 633 nm binds a mode
+        raise RuntimeError("no bound SPP mode for silver/air at 633 nm")
     return {
         "drude_model": {
             "eps_inf": EPS_INF,
@@ -651,10 +661,11 @@ def build_summary(silver: dict, maps: dict, cut: dict, n_points: int) -> dict:
             "eps_drude": [eps_633.real, eps_633.imag],
             "eps_johnson_christy": [EPS_AG_JC_633NM.real, EPS_AG_JC_633NM.imag],
             "relative_deviation_vs_jc": float(rel_dev),
-            "n_eff": float(silver["n_eff"][i633]),
-            "propagation_length_um": float(silver["L"][i633] * 1e6),
-            "penetration_depth_dielectric_nm": float(silver["delta_d"][i633] * 1e9),
-            "penetration_depth_metal_nm": float(silver["delta_m"][i633] * 1e9),
+            "wavelength_nm": 633.0,
+            "n_eff": float(anchor["n_eff"]),
+            "propagation_length_um": float(anchor["L"] * 1e6),
+            "penetration_depth_dielectric_nm": float(anchor["delta_d"] * 1e9),
+            "penetration_depth_metal_nm": float(anchor["delta_m"] * 1e9),
         },
         "surface_plasmon_asymptote": {
             "hbar_omega_sp_eV": surface_plasmon_energy_ev(),

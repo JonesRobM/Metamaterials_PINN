@@ -209,8 +209,6 @@ cython_debug/
 
 # Training run outputs (models under artifacts/models/ stay tracked)
 artifacts/runs/
-!/figures/pinn_point_charge_heatmap.png
-!/figures/point_charge_electric_field.png
 !/figures/plane_wave_validation/
 !/figures/spp_validation/
 !/figures/inverse_design/
@@ -221,3 +219,4 @@ artifacts/runs/
 !/figures/emt_validity/
 !/figures/hmm_surrogate/
 !/figures/multilayer/
+!/figures/ablation/

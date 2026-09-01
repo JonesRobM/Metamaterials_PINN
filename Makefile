@@ -45,7 +45,8 @@ SITE_FIGURES := \
   figures/emt_validity/emt_period_sweep.png \
   figures/dispersion/metamaterial_design_space.png \
   figures/spp_validation/field_maps.png \
-  figures/inverse_design/wavevector_map.png
+  figures/inverse_design/wavevector_map.png \
+  figures/ablation/ablation_training_curves.png
 
 site-assets:
 	@mkdir -p docs/assets

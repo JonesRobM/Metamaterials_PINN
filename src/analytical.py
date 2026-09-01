@@ -1,63 +1,16 @@
-"""Closed-form reference solutions used by scripts and tests.
+"""Closed-form reference solutions the PINNs are validated against.
 
-These are the analytical solutions the PINNs are compared against. They live
-here so that training and visualisation scripts share a single definition.
+A single definition of each, shared by the experiments, the visualisation
+scripts and the tests, so no two of them can drift apart.
 """
 
 import cmath
 import math
-from typing import Sequence, Tuple, Union
+from typing import Tuple
 
-import numpy as np
 import torch
 
 from src.constants import EPS0, MU0
-
-ArrayLike = Union[np.ndarray, torch.Tensor, float]
-
-
-def analytical_potential(
-    x: ArrayLike, y: ArrayLike, q: float, q_pos: Sequence[float], r_ref: float = 1.0
-) -> ArrayLike:
-    """Electrostatic potential of a point charge in two dimensions.
-
-    In 2-D a "point charge" is a line charge of density ``q`` per unit length,
-    whose potential solves the 2-D Poisson equation:
-
-        V(r) = -(q / (2 pi eps0)) ln(r / r_ref)
-
-    This is the solution that satisfies ``∇²V = 0`` away from the charge in
-    2-D (the 3-D Coulomb ``1/r`` does not). ``r_ref`` fixes the arbitrary
-    additive constant (V = 0 at r = r_ref). A small offset avoids ``ln(0)``
-    exactly at the charge location.
-
-    Accepts NumPy arrays or torch tensors; with tensors the result stays on the
-    autograd graph so ``E = -∇V`` can be obtained by differentiation.
-    """
-    xp = torch if isinstance(x, torch.Tensor) else np
-    k = 1.0 / (2.0 * np.pi * EPS0)
-    r = xp.sqrt((x - q_pos[0]) ** 2 + (y - q_pos[1]) ** 2)
-    return -k * q * xp.log((r + 1e-9) / r_ref)
-
-
-def analytical_point_charge_field(
-    X: np.ndarray, Y: np.ndarray, q: float, q_pos: Sequence[float], r_min_sq: float = 1e-6
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Electric field (Ex, Ey) of a 2-D point (line) charge on a grid.
-
-    E = -∇V = (q / (2 pi eps0)) r_hat / r, consistent with
-    :func:`analytical_potential`. Points closer than sqrt(r_min_sq) to the
-    charge are left as zero.
-    """
-    k = 1.0 / (2.0 * np.pi * EPS0)
-    rx = X - q_pos[0]
-    ry = Y - q_pos[1]
-    r_sq = rx**2 + ry**2
-    mask = r_sq >= r_min_sq
-    r2 = np.where(mask, r_sq, 1.0)
-    Ex = np.where(mask, k * q * rx / r2, 0.0)
-    Ey = np.where(mask, k * q * ry / r2, 0.0)
-    return Ex, Ey
 
 
 def analytical_plane_wave(
@@ -187,8 +140,6 @@ def complex_to_pinn_format(field: torch.Tensor) -> torch.Tensor:
 
 
 __all__ = [
-    "analytical_potential",
-    "analytical_point_charge_field",
     "analytical_plane_wave",
     "analytical_spp_fields",
     "complex_to_pinn_format",
