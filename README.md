@@ -5,6 +5,8 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+**[Project site and results →](https://jonesrobm.github.io/Metamaterials_PINN/)**
+
 Physics-informed neural networks (PINNs) that solve frequency-domain Maxwell's
 equations for surface plasmon polaritons at metamaterial interfaces, validated
 throughout against closed-form and transfer-matrix references.
