@@ -169,7 +169,25 @@ class MaxwellDivergenceLoss(BaseLoss):
 
     Args:
         weight: Loss weight.
+
+    Note:
+        Unlike :class:`MaxwellCurlLoss` this takes **no** ``frequency``: the
+        divergence residuals are time-harmonic-independent, so there is nothing
+        for ω to do. Passing one is rejected with an explanatory error rather
+        than the base class's bare ``unexpected keyword argument`` (which names
+        neither this class nor the reason).
     """
+
+    def __init__(self, weight: float = 1.0, **kwargs):
+        if kwargs:
+            raise TypeError(
+                f"{type(self).__name__} takes only 'weight'; got "
+                f"{sorted(kwargs)}. The divergence residuals ∇·(εE) and ∇·H "
+                "contain no frequency, so unlike MaxwellCurlLoss this loss has "
+                "no 'frequency', 'mu0' or 'eps0' argument. Permittivity is "
+                "supplied per call via compute(..., epsilon=...)."
+            )
+        super().__init__(weight)
 
     def compute(
         self,

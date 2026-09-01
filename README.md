@@ -231,6 +231,30 @@ anchor; results in `docs/plans/`):
   differentiable dispersion in `src/design.py`: target wavevector, maximum
   propagation under a confinement bound, target field enhancement).
 
+### Known limitation: homogenisation of the multilayer
+
+The metamaterial results above model the Ag/silica multilayer as a *homogeneous*
+uniaxial medium. `examples/emt_validity.py` tests that approximation directly,
+against a transfer-matrix solve of the real layered stack
+(`src/transfer_matrix.py`, itself validated to 10⁻¹² against Fresnel and to
+10⁻¹⁹ against the closed-form single-interface SPP).
+
+The finding is that for a *surface* mode the leading error is **O(a)** in the
+layer period — a termination effect — not the **O((a/λ)²)** bulk term that the
+usual "period ≪ λ" rule guards. Metal- and dielectric-terminated stacks err by
+equal magnitudes with opposite signs, which is the signature. In practice:
+
+| layer period | error in Re k_spp | error in Im k_spp (∝ propagation length) |
+|---|---|---|
+| 2 nm | 0.2 % | 1.9 % |
+| 10 nm | 0.9 % | 9.1 % |
+| 30 nm | 2.3 % | 24 % |
+
+So the homogenised dispersion is reliable, but homogenised **loss figures are
+optimistic** unless the period is very small. Terminating the stack with a
+half-thickness metal layer cancels the O(a) term and restores O(a²), holding
+the error below 1 % out to a 60 nm period.
+
 ## 🛠️ Technical Details
 
 ### Automatic Differentiation

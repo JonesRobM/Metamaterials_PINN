@@ -72,6 +72,20 @@ line. The sweeps evaluate this with a vectorised transcription of
 40 000 points); ``tests/examples/test_hyperbolic_metamaterial.py`` pins the
 transcription to the class itself, which stays the authority.
 
+Homogenisation caveat
+---------------------
+Everything here treats the multilayer as a homogeneous uniaxial medium. That is
+an approximation, and ``max_layer_period`` reports only its *bulk* validity
+limit (``a·k ≪ 1``, ~33 nm here). ``examples/emt_validity.py`` measures the
+error directly against a transfer-matrix solve of the real layered stack and
+finds that for this *surface* mode the leading term is O(a), not O((a/λ)²) —
+a termination effect, evidenced by metal- and dielectric-terminated stacks
+erring by equal magnitudes with opposite signs. Consequently ``Re k_spp`` is
+within ~1 % only for periods ≲ 11 nm, and ``Im k_spp`` — every propagation
+length and loss figure quoted here — is ~9 % optimistic already at 10 nm.
+Read the band recommendation below as a statement about the homogenised model;
+consult that study before treating any of it as fabrication advice.
+
 Sign convention: ``exp(-iωt)``, so ``Im ε > 0``, ``Im k_spp > 0``, ``Re κ > 0``.
 
 Usage::
@@ -533,6 +547,12 @@ def band_vs_fill_fraction(
         rows.append(
             {
                 "fill_fraction": float(f),
+                # NB: this is the *qualifying* band — the criteria in
+                # `recommend_band` (kappa spread, nonlinearity, n_eff ratio,
+                # L/lambda_spp) have already been applied, so it is strictly
+                # narrower than the region where a bound mode merely exists.
+                # `bound_mode_regions` at the top level is the unfiltered one.
+                "band_is_criteria_filtered": True,
                 "band": None
                 if band is None
                 else {
@@ -1174,12 +1194,23 @@ def _print_recommendation(summary: Dict[str, object]) -> None:
         )
     )
     print(
-        "Fabrication   : effective-medium theory needs a period <= {:.1f} nm "
+        "Fabrication   : bulk effective-medium validity needs a period <= {:.1f} nm "
         "(i.e. <= {:.1f} nm Ag + {:.1f} nm silica)".format(
             band["max_layer_period_nm"],
             band["max_layer_period_nm"] * design["fill_fraction"],
             band["max_layer_period_nm"] * (1.0 - design["fill_fraction"]),
         )
+    )
+    print(
+        "                BUT that is a BULK criterion, O((a/lambda)^2). For this\n"
+        "                SURFACE mode the leading error is O(a) — a termination\n"
+        "                effect — so it is far stricter: see examples/emt_validity.py,\n"
+        "                which measures it against a transfer-matrix solve of the real\n"
+        "                multilayer. At a 10 nm period Re k_spp is good to ~1% but\n"
+        "                Im k_spp (hence propagation length) is ~9% optimistic; at\n"
+        "                30 nm Im k_spp is ~24% out. Terminating the stack with a\n"
+        "                half-thickness metal layer cancels the O(a) term and\n"
+        "                restores O(a^2), keeping the error < 1% out to 60 nm."
     )
     print("=" * 78 + "\n")
 

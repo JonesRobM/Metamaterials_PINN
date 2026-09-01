@@ -143,6 +143,21 @@ class TestMaxwellCurlLoss:
 
 
 # --------------------------------------------------------------------------- divergence
+class TestMaxwellDivergenceLossConstructor:
+    def test_weight_only(self):
+        assert MaxwellDivergenceLoss(weight=2.5).weight == 2.5
+
+    def test_frequency_is_rejected_with_an_explanatory_message(self):
+        """The curl loss takes a frequency and this one does not; the error has
+        to say which class and why, not just 'unexpected keyword argument'."""
+        with pytest.raises(TypeError) as excinfo:
+            MaxwellDivergenceLoss(frequency=2e15)
+        message = str(excinfo.value)
+        assert "MaxwellDivergenceLoss" in message
+        assert "frequency" in message
+        assert "MaxwellCurlLoss" in message
+
+
 class TestMaxwellDivergenceLoss:
     def test_plane_wave_zero(self, plane_wave_net, coords64):
         loss = MaxwellDivergenceLoss().compute(network=plane_wave_net, coords=coords64)

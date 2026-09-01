@@ -214,3 +214,6 @@ artifacts/runs/
 !/figures/spp_dispersion/
 !/figures/hyperbolic/
 !/figures/hmm_dispersion/
+!/figures/emt_validity/
+!/figures/hmm_surrogate/
+!/figures/multilayer/

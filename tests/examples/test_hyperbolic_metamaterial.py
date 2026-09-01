@@ -405,6 +405,15 @@ class TestMainEndToEnd:
         assert design_row["band"]["wavelength_nm"] == pytest.approx(
             on_disk["recommended_band"]["wavelength_nm"]
         )
+        # The scan's "band" is criteria-filtered, so it must be no wider than
+        # the region where a bound mode actually exists; the flag says so.
+        assert design_row["band_is_criteria_filtered"] is True
+        bound_lo, bound_hi = (
+            on_disk["bound_mode_regions"][0]["wavelength_nm"][0],
+            on_disk["bound_mode_regions"][0]["wavelength_nm"][1],
+        )
+        band_lo, band_hi = sorted(design_row["band"]["wavelength_nm"])
+        assert min(bound_lo, bound_hi) <= band_lo and band_hi <= max(bound_lo, bound_hi)
 
         design = on_disk["design"]
         assert set(design) == {
