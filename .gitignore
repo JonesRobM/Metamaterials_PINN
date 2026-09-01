@@ -212,3 +212,5 @@ artifacts/runs/
 !/figures/inverse_design/
 !/figures/dispersion/
 !/figures/spp_dispersion/
+!/figures/hyperbolic/
+!/figures/hmm_dispersion/

@@ -388,6 +388,22 @@ class TestMetamaterialProperties:
         # Field extends further into the dielectric than into the metal
         assert m.penetration_depth_dielectric(eps_dielectric=eps_d) > m.penetration_depth_metamaterial(eps_dielectric=eps_d)
 
+    def test_public_decay_constants_match_derived_quantities(self):
+        """The public accessor returns the same complex constants the
+        penetration depths and dispersion relation are built from."""
+        eps_m, eps_d = -20.0 + 1.0j, 2.25
+        m = MetamaterialProperties(eps_m, eps_m, omega=OMEGA)
+        k, kappa_d, kappa_m = m.decay_constants(eps_dielectric=eps_d)
+
+        assert k == m.spp_wavevector(eps_dielectric=eps_d)
+        # Bound-mode branches: decaying away from the interface on both sides
+        assert kappa_d.real > 0 and kappa_m.real > 0
+        # Consistent with the public depth helpers (which expose only 1 / Re κ)
+        assert m.penetration_depth_dielectric(eps_dielectric=eps_d) == pytest.approx(1 / kappa_d.real)
+        assert m.penetration_depth_metamaterial(eps_dielectric=eps_d) == pytest.approx(1 / kappa_m.real)
+        # Satisfies the defining relations
+        assert kappa_d**2 == pytest.approx(k**2 - eps_d * K0**2, rel=1e-12)
+
     def test_field_enhancement_factor_isotropic(self):
         eps_m, eps_d = -20.0, 2.25
         m = MetamaterialProperties(eps_m, eps_m, omega=OMEGA)

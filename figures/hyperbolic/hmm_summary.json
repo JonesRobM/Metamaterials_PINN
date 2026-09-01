@@ -1,0 +1,315 @@
+{
+  "design": {
+    "fill_fraction": 0.3,
+    "eps_dielectric_layer": 2.25,
+    "eps_superstrate": 1.0,
+    "optical_axis": "z",
+    "drude_model": {
+      "eps_inf": 3.7,
+      "hbar_omega_p_eV": 9.1,
+      "hbar_gamma_eV": 0.018
+    },
+    "omega_ref": 2975752870946120.0,
+    "lambda_ref_nm": 633.0
+  },
+  "spectral_window": {
+    "photon_energy_ev": [
+      0.8,
+      5.0
+    ],
+    "wavelength_nm": [
+      247.96839671447088,
+      1549.802479465443
+    ]
+  },
+  "transitions": {
+    "eps_t_zeros": [
+      {
+        "omega": 4621218502422919.0,
+        "photon_energy_ev": 3.041741272113794,
+        "wavelength_nm": 407.6092845039224
+      }
+    ],
+    "eps_n_zeros": [
+      {
+        "omega": 6401743400877294.0,
+        "photon_energy_ev": 4.213704049207179,
+        "wavelength_nm": 294.24040442651267
+      },
+      {
+        "omega": 7187197070047744.0,
+        "photon_energy_ev": 4.730699045569358,
+        "wavelength_nm": 262.08430754722315
+      }
+    ],
+    "eps_n_pole": [
+      {
+        "omega": 6401460788639754.0,
+        "photon_energy_ev": 4.213518030453363,
+        "wavelength_nm": 294.2533945770136
+      }
+    ],
+    "pole_resonance": {
+      "omega": 6401460788639754.0,
+      "photon_energy_ev": 4.213518030453363,
+      "wavelength_nm": 294.2533945770136,
+      "re_eps_n": 3.2142857142733336,
+      "im_eps_n": 155.552650982062
+    }
+  },
+  "anisotropy_regions": [
+    {
+      "class": "type-II",
+      "photon_energy_ev": [
+        0.8,
+        3.041741272113794
+      ],
+      "wavelength_nm": [
+        407.6092845039224,
+        1549.802479465443
+      ]
+    },
+    {
+      "class": "elliptic-dielectric",
+      "photon_energy_ev": [
+        3.0425017074318226,
+        4.213518030453363
+      ],
+      "wavelength_nm": [
+        294.2533945770136,
+        407.5074076520094
+      ]
+    },
+    {
+      "class": "type-I",
+      "photon_energy_ev": [
+        4.213704049207179,
+        4.729516370807965
+      ],
+      "wavelength_nm": [
+        262.14984500847527,
+        294.24040442651267
+      ]
+    },
+    {
+      "class": "elliptic-dielectric",
+      "photon_energy_ev": [
+        4.730699045569358,
+        5.0
+      ],
+      "wavelength_nm": [
+        247.96839671447088,
+        262.08430754722315
+      ]
+    }
+  ],
+  "bound_mode_regions": [
+    {
+      "photon_energy_ev": [
+        0.8,
+        3.041741272113794
+      ],
+      "wavelength_nm": [
+        407.6092845039224,
+        1549.802479465443
+      ]
+    }
+  ],
+  "recommended_band": {
+    "index_range": [
+      119,
+      400
+    ],
+    "omega": [
+      2127479797966100.8,
+      4185892371797542.0
+    ],
+    "omega_over_omega_ref": [
+      0.7149383333333333,
+      1.4066666666666667
+    ],
+    "photon_energy_ev": [
+      1.4003326403347758,
+      2.755204407938565
+    ],
+    "wavelength_nm": [
+      450.0,
+      885.3910477127397
+    ],
+    "relative_width": 0.6520802254268191,
+    "n_eff_range": [
+      1.033304750922055,
+      1.3608513878390516
+    ],
+    "k_spp_re_range_per_um": [
+      7.3328561945645,
+      19.001069878500616
+    ],
+    "kappa_d_range_per_um": [
+      1.8467669225225753,
+      12.888004070145483
+    ],
+    "kappa_m_range_per_um": [
+      7.575107658726294,
+      18.436622207795086
+    ],
+    "kappa_spread": 9.983188448389438,
+    "decay_length_range_nm": [
+      54.239870445313755,
+      541.486848071796
+    ],
+    "nonlinearity_percent": 24.263258903069904,
+    "curvature_percent": 13.279911843893963,
+    "max_residual_per_um": 2.8310888954968507,
+    "propagation_length_um_range": [
+      4.402069168161488,
+      134.397099777315
+    ],
+    "L_over_lambda_spp_range": [
+      13.312359859680136,
+      156.8495209758453
+    ],
+    "max_layer_period_nm": 33.0669435545171
+  },
+  "fill_fraction_scan": [
+    {
+      "fill_fraction": 0.15,
+      "band": {
+        "wavelength_nm": [
+          590.5511811023622,
+          1239.6694214876034
+        ],
+        "omega_over_omega_ref": [
+          0.51062,
+          1.07188
+        ],
+        "relative_width": 0.7093333333333333,
+        "nonlinearity_percent": 23.93633402627298,
+        "n_eff_range": [
+          1.0297740356037264,
+          1.3708685561670844
+        ],
+        "kappa_spread": 9.948945950501745
+      }
+    },
+    {
+      "fill_fraction": 0.2,
+      "band": {
+        "wavelength_nm": [
+          517.9856115107914,
+          1078.490113840623
+        ],
+        "omega_over_omega_ref": [
+          0.5869316666666666,
+          1.2220416666666667
+        ],
+        "relative_width": 0.7021772939346811,
+        "nonlinearity_percent": 25.66250441451295,
+        "n_eff_range": [
+          1.030837473509945,
+          1.4012314161322716
+        ],
+        "kappa_spread": 9.990568804914634
+      }
+    },
+    {
+      "fill_fraction": 0.25,
+      "band": {
+        "wavelength_nm": [
+          470.5882352941177,
+          965.14745308311
+        ],
+        "omega_over_omega_ref": [
+          0.6558583333333333,
+          1.345125
+        ],
+        "relative_width": 0.6889279437609841,
+        "nonlinearity_percent": 27.165544501410526,
+        "n_eff_range": [
+          1.0322276715198628,
+          1.426614704978087
+        ],
+        "kappa_spread": 9.931750250628856
+      }
+    },
+    {
+      "fill_fraction": 0.3,
+      "band": {
+        "wavelength_nm": [
+          450.0,
+          885.3910477127397
+        ],
+        "omega_over_omega_ref": [
+          0.7149383333333333,
+          1.4066666666666667
+        ],
+        "relative_width": 0.6520802254268191,
+        "nonlinearity_percent": 24.263258903069904,
+        "n_eff_range": [
+          1.033304750922055,
+          1.3608513878390516
+        ],
+        "kappa_spread": 9.983188448389438
+      }
+    },
+    {
+      "fill_fraction": 0.35,
+      "band": {
+        "wavelength_nm": [
+          450.0,
+          820.419325432999
+        ],
+        "omega_over_omega_ref": [
+          0.7715566666666667,
+          1.4066666666666667
+        ],
+        "relative_width": 0.583144979011947,
+        "nonlinearity_percent": 19.00427888181343,
+        "n_eff_range": [
+          1.0347406281105906,
+          1.2584969753540156
+        ],
+        "kappa_spread": 9.932661188185476
+      }
+    },
+    {
+      "fill_fraction": 0.4,
+      "band": {
+        "wavelength_nm": [
+          450.0,
+          771.2082262210796
+        ],
+        "omega_over_omega_ref": [
+          0.82079,
+          1.4066666666666667
+        ],
+        "relative_width": 0.5260498894853173,
+        "nonlinearity_percent": 15.988018357564746,
+        "n_eff_range": [
+          1.0358571923637778,
+          1.2050129713596103
+        ],
+        "kappa_spread": 9.985444151969865
+      }
+    },
+    {
+      "fill_fraction": 0.5,
+      "band": null
+    },
+    {
+      "fill_fraction": 0.6,
+      "band": null
+    }
+  ],
+  "band_criteria": {
+    "search_wavelength_nm": [
+      450.0,
+      1500.0
+    ],
+    "max_kappa_spread": 10.0,
+    "min_nonlinearity_percent": 15.0,
+    "min_neff_ratio": 1.15,
+    "min_L_over_lambda_spp": 10.0
+  },
+  "n_points": 401
+}

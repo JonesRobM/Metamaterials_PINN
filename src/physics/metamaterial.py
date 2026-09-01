@@ -255,6 +255,29 @@ class MetamaterialProperties:
         kappa_m = _decaying_root(eps_t * (k**2 / eps_n - k0_val**2))
         return k, kappa_d, kappa_m
 
+    def decay_constants(
+        self,
+        omega: Optional[float] = None,
+        eps_dielectric: complex = 1.0,
+        propagation_direction: str = "x",
+    ) -> Tuple[complex, complex, complex]:
+        """Complex ``(k_spp, κ_d, κ_m)`` for the bound TM surface mode.
+
+        Public counterpart to the penetration-depth helpers, which expose only
+        ``1 / Re κ``. The full complex constants are what an analytical mode
+        profile needs (see :func:`src.analytical.analytical_spp_fields`), so
+        callers should not have to reach for the private method.
+
+        Args:
+            omega: Angular frequency (rad/s); defaults to the constructor value.
+            eps_dielectric: Relative permittivity of the dielectric half-space.
+            propagation_direction: In-plane propagation axis (``'x'`` or ``'y'``).
+
+        Returns:
+            ``(k_spp, κ_d, κ_m)`` on the ``Im k ≥ 0`` / ``Re κ > 0`` branches.
+        """
+        return self._decay_constants(omega, eps_dielectric, propagation_direction)
+
     def propagation_length(
         self,
         omega: Optional[float] = None,

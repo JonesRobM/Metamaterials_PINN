@@ -78,28 +78,32 @@ class TestUntrainedPINN:
 
         maxwell_loss = MaxwellCurlLoss(OMEGA)(network=pinn, coords=coords.clone().requires_grad_(True))
         assert torch.isfinite(maxwell_loss)
-        assert float(maxwell_loss) > 0
+        assert float(maxwell_loss.detach()) > 0
         maxwell_loss.backward()
         assert all(p.grad is not None for p in pinn.parameters())
 
 
+# Module-level so the class-scoped fixtures are not instance methods
+# (pytest deprecates that pattern; they never needed `self` anyway).
+@pytest.fixture(scope="class")
+def trained():
+    net = _trained_architecture()
+    state = torch.load(CHECKPOINT, map_location="cpu")
+    net.load_state_dict(state)  # strict: raises if the architecture drifted
+    net.eval()
+    return net
+
+
+@pytest.fixture(scope="class")
+def coords():
+    # Same cube of side 2λ that scripts/train_plane_wave_pinn.py trains on
+    lam = 2 * np.pi / K0
+    sampler = UniformSampler(domain_bounds=[(-lam, lam)] * 3, seed=1234)
+    return sampler.sample_points(n_points=512)["points"]
+
+
 @pytest.mark.skipif(not CHECKPOINT.exists(), reason=f"trained checkpoint not found at {CHECKPOINT}")
 class TestTrainedCheckpoint:
-    @pytest.fixture(scope="class")
-    def trained(self):
-        net = _trained_architecture()
-        state = torch.load(CHECKPOINT, map_location="cpu")
-        net.load_state_dict(state)  # strict: raises if the architecture drifted
-        net.eval()
-        return net
-
-    @pytest.fixture(scope="class")
-    def coords(self):
-        # Same cube of side 2λ that scripts/train_plane_wave_pinn.py trains on
-        lam = 2 * np.pi / K0
-        sampler = UniformSampler(domain_bounds=[(-lam, lam)] * 3, seed=1234)
-        return sampler.sample_points(n_points=512)["points"]
-
     def test_checkpoint_matches_architecture(self, trained):
         assert trained.core.fourier_encoder.k_vectors.shape == (64, 3)
         assert trained.core.input_projection.in_features == 131  # 128 Fourier + 3 raw coords

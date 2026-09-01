@@ -190,5 +190,6 @@ __all__ = [
     "analytical_potential",
     "analytical_point_charge_field",
     "analytical_plane_wave",
+    "analytical_spp_fields",
     "complex_to_pinn_format",
 ]
