@@ -896,8 +896,11 @@ def probe_representability(
     :func:`tmm_fields_si` on fresh interior points. If the answer is no, no
     choice of PINN loss can rescue it and the honest move is to reduce ``N``,
     widen ``a`` or grow the network. Because it isolates *representation* from
-    *optimisation under a physics objective*, its rel L2 is also the floor the
-    full run should be judged against.
+    *optimisation under a physics objective*, its rel L2 at matched-ish budget
+    is a floor to judge the full run against — but note it is a *moving* floor:
+    at 10x the epochs it reaches 1.4e-3, past the full PINN (see
+    ``figures/ablation/supervised_baseline.json`` and the 2026-09-02 ablation
+    doc). It fits the answer; the PINN solves the problem.
 
     Returns:
         Dict with the final and best rel L2 (overall and per region), the loss

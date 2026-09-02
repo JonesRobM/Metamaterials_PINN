@@ -35,7 +35,8 @@ the homogenised model (dashed blue) draws a smooth curve straight through it.
 | Effective medium | 1.082930 | 2.33% | 11778 | 33.6% |
 | **PINN (layered)** | **1.058365** | **0.005%** | **8982** | **1.92%** |
 
-That is 472× closer in the real part and 17.5× closer in the imaginary part.
+That is 430–1700× closer in the real part and 11–18× closer in the imaginary
+part, across three training seeds — every seed reaches target tier.
 The field itself matches to a relative L2 of 5.8×10⁻³, against 0.247 for the
 homogenised model.
 

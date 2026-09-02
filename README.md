@@ -13,8 +13,9 @@ throughout against closed-form and transfer-matrix references.
 
 The headline result: a PINN trained on a **real Ag/silica multilayer** predicts
 the bound surface mode substantially more accurately than the effective-medium
-approximation normally used for such structures — 472x closer in Re *k*<sub>spp</sub>
-and 17.5x closer in Im *k*<sub>spp</sub>, measured against a transfer-matrix solution.
+approximation normally used for such structures — 430–1700x closer in
+Re *k*<sub>spp</sub> and 11–18x closer in Im *k*<sub>spp</sub> across three
+training seeds, measured against a transfer-matrix solution.
 
 <p align="center">
   <img src="figures/multilayer/field_profiles.png" width="90%"
@@ -144,6 +145,11 @@ actual layers reduces those to 0.005% and 1.9%:
 | Effective medium         |                 1.082930 |            2.33% |                       11778 |           33.6% |
 | **PINN (layered)** |       **1.058365** | **0.005%** |              **8982** | **1.92%** |
 
+The result is stable across seeds: three independently trained runs give field
+relative L2 of 5.6×10⁻³ ± 0.6×10⁻³, every one reaching target tier with a bound
+mode in both regions (`figures/multilayer/seed_variance.json`). The table above
+quotes seed 0, the shipped checkpoint.
+
 The mechanism is a *displacement adapter*: the network emits a continuous
 D<sub>z</sub>, which is divided by the piecewise-constant eps(z), so the physical
 E<sub>z</sub> discontinuity is exact by construction at every interface rather
@@ -169,6 +175,17 @@ The anchor result is the one worth dwelling on. Without it, training reaches a
 final loss **31,000x lower than the control** — a beautifully converging curve
 — while the field it has learned is 0.1% of the correct amplitude. The physics
 residual is genuinely minimised; it is just minimised by nothing at all.
+
+### The supervised baseline, and what it means
+
+Plain regression against the transfer-matrix field — no physics — reaches
+relative L2 1.4e-3 on the multilayer in ten minutes, beating the 45-minute
+PINN's 5.8e-3 by 4x (`figures/ablation/supervised_baseline.json`). That is not
+an embarrassment; it is the point. The supervised net needs the full field as
+training data, i.e. a problem someone has already solved. The PINN needs only
+boundary values and Maxwell's equations. When an exact reference exists,
+fitting it (or calling it) is strictly the better tool; physics-informed
+training is for when one does not. Few PINN demonstrations run this control.
 
 ---
 
@@ -214,6 +231,14 @@ Homogenised *dispersion* is reliable; homogenised **loss figures are optimistic*
 unless the period is small. Terminating the stack with a half-thickness metal
 layer cancels the O(a) term and restores O(a^2), holding the error under 1% out
 to a 60 nm period.
+
+**Cost.** `examples/cost_analysis.py` measures when the design-space surrogate
+amortises. Per k_spp query: closed-form dispersion 0.1 µs, transfer matrix on
+the real stack 2.3 ms, trained surrogate 1.6 ms. Against the closed form the
+surrogate **never** pays for its 82 minutes of training; against the transfer
+matrix it needs ~7 million queries. It crosses over at 8–82 queries only
+against a reference costing minutes per solve — the full-wave regime this
+project has not yet entered. For planar stacks, use the transfer matrix.
 
 **Other caveats.** Silver is a Drude fit with no interband transitions, so it
 degrades below ~450 nm. The dispersion experiments hold eps fixed or take it

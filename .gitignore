@@ -220,3 +220,4 @@ artifacts/runs/
 !/figures/hmm_surrogate/
 !/figures/multilayer/
 !/figures/ablation/
+!/figures/cost_analysis/

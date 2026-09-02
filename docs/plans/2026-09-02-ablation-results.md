@@ -316,3 +316,41 @@ that quietly trained longer than the others would invalidate the comparison.
 3. Repeat the control-vs-`no_ramp` comparison at boundary weight 10 to confirm
    §4.4's reading — that the collapse in the original note was the joint effect
    of no ramp *and* a weak anchor.
+
+
+---
+
+## Addendum (2026-09-02, same day): a supervised baseline, at and beyond matched compute
+
+The multilayer experiment's tractability probe is, methodologically, a
+supervised baseline: plain regression against the transfer-matrix field, fresh
+collocation points every epoch, evaluated on a fresh sample. It was originally
+run only long enough to establish representability (2500 epochs, 48.8 s). Two
+questions follow: had it plateaued, and what does it do with real compute?
+
+| model | information used | compute | rel L2 |
+|---|---|---:|---:|
+| supervised regression, 2500 epochs | full TMM field everywhere | 48.8 s | 7.53e-3 |
+| **PINN, full recipe** | **boundary values + Maxwell only** | 45.2 min | **5.75e-3** |
+| supervised regression, 25 000 epochs | full TMM field everywhere | 10.0 min | **1.40e-3** |
+
+(Data: `figures/ablation/supervised_baseline.json`. Same architecture, seed
+and evaluation protocol throughout; the 10x run also wins in every region —
+air 1.07e-3 vs 2.60e-3, stack 3.31e-3 vs 1.83e-2, substrate 4.96e-2 vs 0.104.)
+
+It had **not** plateaued: the earlier "floor" reading was an artefact of the
+short budget (MSE fell a further 24x between epoch 2500 and 25 000). Given a
+quarter of the PINN's compute and the whole answer to copy, supervised
+regression beats the physics-informed run by 4.1x.
+
+**The honest reading.** These two models answer different questions. The
+supervised net *compresses an existing solution* — it cannot be trained at all
+unless the field is already known everywhere, which here means the transfer
+matrix has already solved the problem. The PINN *solves* the problem from
+boundary values and Maxwell's equations. Where a fast exact reference exists,
+fitting its output is strictly better and cheaper than physics-informed
+training — and calling the reference directly is better still (see
+`examples/cost_analysis.py`). The PINN's value proposition is confined to the
+regime this project has been explicit about all along: geometries where no
+such reference exists. This measurement makes that confinement quantitative
+rather than rhetorical.

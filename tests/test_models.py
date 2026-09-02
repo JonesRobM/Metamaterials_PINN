@@ -12,7 +12,6 @@ from src.models.pinn_network import (
     ElectromagneticActivation,
     ElectromagneticPINN,
     FourierEMFeatures,
-    MetamaterialDeepONet,
     MultiFrequencyPINN,
     NondimensionalPINN,
     SPPNetwork,
@@ -286,34 +285,6 @@ class TestMultiFrequencyPINN:
         _assert_grads_populated(net, net(_coords(), freq).pow(2).mean())
 
 
-class TestMetamaterialDeepONet:
-    @pytest.fixture
-    def net(self):
-        torch.manual_seed(0)
-        return MetamaterialDeepONet(material_param_dim=9, spatial_dim=3, field_components=6,
-                                    branch_hidden=[16], trunk_hidden=[16], latent_dim=8)
-
-    def test_forward_shape(self, net):
-        n = 10
-        out = net(torch.randn(n, 9), _coords(n), torch.full((n, 1), 1e15))
-        assert out.shape == (n, 6)
-        assert torch.isfinite(out).all()
-
-    def test_gradient_flow(self, net):
-        n = 10
-        out = net(torch.randn(n, 9), _coords(n), torch.full((n, 1), 1e15))
-        _assert_grads_populated(net, out.pow(2).mean())
-
-    def test_depends_on_material_parameters(self, net):
-        n = 10
-        c, f = _coords(n), torch.full((n, 1), 1e15)
-        with torch.no_grad():
-            a = net(torch.ones(n, 9), c, f)
-            b = net(-torch.ones(n, 9), c, f)
-        assert not torch.allclose(a, b)
-
-
-# --------------------------------------------------------------------------- electrostatics
 # --------------------------------------------------------------------------- field format
 class TestFieldFormat:
     def test_round_trip_split_to_complex(self):

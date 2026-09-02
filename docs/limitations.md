@@ -54,6 +54,16 @@ phase runs in double precision. Frequency-conditioned networks are least
 accurate at their band edges, an interpolation effect: train on a band about 10%
 wider than the one to be queried.
 
+**When does the surrogate pay for itself? Mostly, it doesn't — yet.**
+Measured per-query costs for k_spp(ω, f) (`examples/cost_analysis.py`):
+closed-form dispersion 0.1 µs, transfer matrix on the real six-period stack
+2.3 ms, trained surrogate 1.6 ms. Against the closed form, 82 minutes of
+training never amortises. Against the transfer matrix, it would take about
+seven million queries. The crossover only becomes reasonable — 8 to 82 queries
+— against a reference costing minutes per solve, i.e. the 2-D/3-D full-wave
+regime this project has not yet entered. For planar stacks the transfer matrix
+is the right tool, and this page says so with measurements.
+
 **Scope of the headline result.** The multilayer experiment is one structure at
 one frequency. It shows the method can capture physics that homogenisation
 misses; it does not establish that it does so across all geometries, and the

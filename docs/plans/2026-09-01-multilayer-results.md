@@ -510,3 +510,28 @@ network — see §11.
    with `validate_hmm_dispersion.py` — but note that a and the Fourier band are
    both frequency-dependent, so the band would have to be sized for the whole
    sweep at once.
+
+
+---
+
+**Addendum (2026-09-02).** The probe was later extended to 25 000 epochs as a
+supervised baseline: it had not plateaued, and reaches rel L2 1.40e-3 in 10
+minutes — past this experiment's PINN. See the addendum in
+[2026-09-02-ablation-results.md](2026-09-02-ablation-results.md) for the
+comparison table and the information-asymmetry reading; the statement above
+that the PINN "beat the probe" holds only at the probe's original 2500-epoch
+budget.
+
+**Addendum (2026-09-02, seed variance).** Two further runs with identical
+configuration at seeds 1 and 2:
+
+| seed | rel L2 | Re k err | Im k err | vs EMT (Re / Im) | tier |
+|---:|---:|---:|---:|---|---|
+| 0 (shipped) | 5.75e-3 | 4.9e-5 | 1.92e-2 | 472x / 17.5x | target |
+| 1 | 4.97e-3 | 5.4e-5 | 2.74e-2 | 431x / 12.3x | target |
+| 2 | 6.16e-3 | 1.4e-5 | 2.95e-2 | 1699x / 11.4x | target |
+
+Mean rel L2 5.63e-3, spread [4.97e-3, 6.16e-3]; bound mode in both regions for
+every seed. Data: `figures/multilayer/seed_variance.json`. The Im k estimate
+remains the noisiest quantity, consistent with the ±15 % single-line scatter
+documented above.

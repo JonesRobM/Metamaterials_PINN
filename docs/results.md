@@ -81,10 +81,24 @@ homogenised approximation, and judge against a transfer-matrix solution.
 | **PINN (layered)** | **1.058365** | **0.005%** | **8982** | **1.92%** |
 
 Field relative L2 is 5.8×10⁻³ against 0.247 for the homogenised model, a factor
-of 43. A supervised probe run first — fitting the reference field directly, with
-no physics loss — reached 7.5×10⁻³ in 49 seconds, confirming the architecture
-could represent the field before committing to the full run. The trained PINN
-then beat that probe.
+of 43.
+
+Across three training seeds the field error is 5.6×10⁻³ ± 0.6×10⁻³ and the
+wavevector improvements over the effective medium span 430–1700× (real part)
+and 11–18× (imaginary part); every seed reaches target tier with a bound mode
+in both regions. Per-seed data: `figures/multilayer/seed_variance.json`.
+
+**Against a supervised baseline, the honest comparison cuts the other way.**
+Plain regression on the transfer-matrix field — no physics loss — reaches
+7.5×10⁻³ in 49 seconds, and 1.4×10⁻³ given ten minutes: four times better than
+the PINN at a quarter of its compute. The two answer different questions. The
+supervised net *compresses a solution that already exists* — it cannot be
+trained unless the field is known everywhere, i.e. the problem is already
+solved. The PINN *solves* the problem from boundary values and Maxwell's
+equations alone. Where a fast exact reference exists, learning its output (or
+just calling it) wins; the physics-informed approach earns its keep only where
+no reference exists. This project says so with a measurement rather than a
+caveat.
 
 The honest caveat: the imaginary part is inferred from a ~1% amplitude change
 across the domain, so individual probe lines scatter by about 15%. Every
