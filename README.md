@@ -143,6 +143,26 @@ spp_metamaterial_pinn/
 
 ---
 
+## 🌊 Plane Wave Validation
+
+As a foundational test for our Physics-Informed Neural Network (PINN) framework, we successfully trained a `ComplexPINN` to discover the electric and magnetic fields of a plane wave propagating in free space. This validation is critical for ensuring that the underlying physics loss functions (Maxwell's equations) are correctly implemented and that the network can learn basic electromagnetic phenomena.
+
+The PINN was trained using only Maxwell's equations as a loss constraint, without any direct data supervision. The results demonstrate the network's ability to accurately approximate the expected plane wave solution.
+
+### Training Progress
+
+The training curve below illustrates the reduction in Maxwell's equations residual loss over 500 epochs, indicating that the PINN converges to a physically consistent solution.
+
+![Plane Wave PINN Training Curve](figures/plane_wave_training_curve.png)
+
+### Predicted Electric Field
+
+After training, the PINN's predicted electric field (E_y component shown here) closely matches the analytical plane wave solution. This visual confirmation further validates the network's capability to learn and represent electromagnetic fields governed by Maxwell's equations.
+
+![Trained PINN Plane Wave E_y Field](figures/trained_pinn_plane_wave_Ey.png)
+
+---
+
 ## 🚀 Quick Start
 
 ### Installation
