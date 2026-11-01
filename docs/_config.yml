@@ -1,0 +1,13 @@
+title: SPPs on Metamaterials via Physics-Informed Neural Networks
+description: >-
+  Physics-informed neural networks for surface plasmon polaritons at
+  metamaterial interfaces, validated against closed-form and transfer-matrix
+  references.
+theme: jekyll-theme-cayman
+show_downloads: false
+
+# GitHub Pages serves this folder, so the figures the site uses are mirrored
+# into docs/assets/ by `make site-assets`. `docs/plans/` holds the raw
+# experiment records and is excluded from the rendered site.
+exclude:
+  - plans

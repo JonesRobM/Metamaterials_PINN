@@ -1,0 +1,26 @@
+{
+  "case": "multilayer, a=30nm, N=6, seed 0",
+  "note": "Supervised regression against the transfer-matrix field (fresh points every epoch, evaluated on a fresh sample), i.e. compressing an existing solution rather than solving the problem. Compare figures/multilayer/metrics.json for the PINN, which sees only boundary values and Maxwell's equations.",
+  "supervised_2500_epochs": {
+    "rel_l2": 0.007529025431722403,
+    "wall_time_s": 48.83196375000989
+  },
+  "supervised_25000_epochs": {
+    "probe_rel_l2": 0.0013969267020002007,
+    "probe_final_mse": 1.3271677801185433e-07,
+    "probe_best_mse": 1.2212379374432203e-07,
+    "probe_epochs": 25000.0,
+    "probe_time_s": 596.9890355829848,
+    "probe_rel_l2_stack": 0.003306447761133313,
+    "probe_rel_l2_air": 0.001066988566890359,
+    "probe_rel_l2_substrate": 0.04955916106700897,
+    "probe_mse_at_2500": 2.883904926420655e-06
+  },
+  "pinn_full_recipe": {
+    "rel_l2": 0.005753589328378439,
+    "rel_l2_air": 0.002599711762741208,
+    "rel_l2_stack": 0.018295085057616234,
+    "rel_l2_substrate": 0.10387077182531357,
+    "train_time_s": 2711.463537957985
+  }
+}

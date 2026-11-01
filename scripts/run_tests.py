@@ -1,41 +1,39 @@
-"""
-Test runner script for physics module.
+"""Run the full test suite under tests/ with verbose output.
 
-Run this script to execute all physics tests and verify implementation correctness.
+Usage:
+    python scripts/run_tests.py [extra pytest args...]
 """
 
 import sys
+from pathlib import Path
+
 import pytest
 import torch
 
-def main():
-    """Run all physics tests with detailed output."""
-    print("Running SPP Metamaterial PINN Physics Tests")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+def main(argv=None):
+    """Run all tests with detailed output."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    print("Running SPP Metamaterial PINN Tests")
     print("=" * 50)
-    
-    # Check PyTorch availability
     print(f"PyTorch version: {torch.__version__}")
     print(f"CUDA available: {torch.cuda.is_available()}")
-    
     if torch.cuda.is_available():
         print(f"CUDA device: {torch.cuda.get_device_name()}")
-    
     print("\nRunning tests...")
-    
-    # Run tests with verbose output
-    exit_code = pytest.main([
-        "tests/test_physics.py",
-        "-v",  # Verbose output
-        "--tb=short",  # Short traceback format
-        "--durations=10",  # Show 10 slowest tests
-        "-x"  # Stop on first failure
-    ])
-    
+
+    exit_code = pytest.main(
+        [str(REPO_ROOT / "tests"), "-v", "--tb=short", "--durations=10", *argv]
+    )
+
     if exit_code == 0:
-        print("\n✓ All physics tests passed successfully!")
+        print("\nAll tests passed successfully!")
     else:
-        print(f"\n✗ Tests failed with exit code {exit_code}")
-        
+        print(f"\nTests failed with exit code {exit_code}")
     return exit_code
 
 

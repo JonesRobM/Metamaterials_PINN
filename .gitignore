@@ -5,7 +5,11 @@ __pycache__/
 
 # C extensions
 *.so
+# Local AI-assistant tooling and internal policy files: development aids,
+# not part of the deliverable. Both cases, since git ignore matching is
+# case-sensitive by default.
 *claude*
+*CLAUDE*
 figures/local/*
 # Distribution / packaging
 .Python
@@ -202,3 +206,18 @@ cython_debug/
 !/figures/untrained_pinn_plane_wave_Ey.png
 !/figures/plane_wave_training_curve.png
 !/figures/trained_pinn_plane_wave_Ey.png
+
+# Training run outputs (models under artifacts/models/ stay tracked)
+artifacts/runs/
+!/figures/plane_wave_validation/
+!/figures/spp_validation/
+!/figures/inverse_design/
+!/figures/dispersion/
+!/figures/spp_dispersion/
+!/figures/hyperbolic/
+!/figures/hmm_dispersion/
+!/figures/emt_validity/
+!/figures/hmm_surrogate/
+!/figures/multilayer/
+!/figures/ablation/
+!/figures/cost_analysis/

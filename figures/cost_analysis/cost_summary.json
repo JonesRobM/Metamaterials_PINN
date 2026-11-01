@@ -1,0 +1,22 @@
+{
+  "t_closed_form_s": 8.300412446260452e-08,
+  "t_tmm_s": 0.0022591875167563558,
+  "t_surrogate_k_query_s": 0.0015594380092807114,
+  "t_surrogate_forward_512pts_s": 0.001414375496096909,
+  "surrogate_train_time_s": 4929.5908808740205,
+  "repeats": 30.0,
+  "hmm_eps_at_ref": [
+    [
+      -3.7900347923931355,
+      0.05950479770975068
+    ],
+    [
+      3.397454572054922,
+      0.002147353161190307
+    ]
+  ],
+  "crossover_queries_vs_closed_form": -1.0,
+  "crossover_queries_vs_tmm": 7044793.641452618,
+  "crossover_queries_vs_hypothetical_60s_solver": 82.16198345656568,
+  "crossover_queries_vs_hypothetical_600s_solver": 8.216006155377173
+}

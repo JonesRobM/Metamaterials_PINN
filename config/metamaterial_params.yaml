@@ -134,9 +134,13 @@ dispersion_models:
 
 # Interface properties
 interface:
-  # Boundary conditions
+  # Boundary conditions (string enum)
   boundary_type: "continuous"         # continuous, impedance, perfect_conductor
-  
+
+  # Unit normal to the interface, pointing from metamaterial into dielectric.
+  # Callers needing the interface orientation must read this, not boundary_type.
+  normal: [0, 0, 1]
+
   # Surface roughness effects
   roughness:
     enabled: false                    # Include surface roughness
@@ -147,14 +151,20 @@ interface:
   nonlocal:
     enabled: false                    # Include spatial dispersion
     beta: 1.0e6                      # Nonlocal parameter (m⁻¹)
-    
-  # Surface plasmon properties (computed)
+
+# ----------------------------------------------------------------------------
+# Derived quantities — DOCUMENTATION ONLY, NOT INPUTS
+# ----------------------------------------------------------------------------
+# Everything under `derived:` is computed at runtime from the material and
+# physics parameters above.  The code never reads these keys as inputs; they
+# are listed here so the schema documents what the physics layer produces.
+# Values are intentionally null.
+derived:
   spp_properties:
-    # These will be computed from material parameters
-    propagation_length: null          # Will be calculated
-    penetration_depth_metal: null     # Will be calculated  
-    penetration_depth_dielectric: null # Will be calculated
-    field_enhancement: null           # Will be calculated
+    propagation_length: null          # L_spp = 1 / (2 Im(k_spp))          (m)
+    penetration_depth_metal: null     # 1 / Im(k_z,metal)                  (m)
+    penetration_depth_dielectric: null # 1 / Im(k_z,dielectric)            (m)
+    field_enhancement: null           # |E_interface| / |E_incident|
 
 # Validation and testing materials
 validation_materials:

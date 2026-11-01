@@ -6,42 +6,48 @@ specifically designed for solving Maxwell's equations in metamaterial
 systems, particularly for Surface Plasmon Polariton (SPP) modeling.
 """
 
-from .pinn_network import (
-    ElectromagneticPINN,
-    ComplexPINN,
-    SPPNetwork,
-    MetamaterialDeepONet,
-    MultiFrequencyPINN
-)
+from .field_format import join_complex, split_complex, to_complex
 from .loss_functions import (
+    BaseLoss,
+    EM_CompositeLoss,
+    InterfaceBoundaryLoss,
     MaxwellCurlLoss,
     MaxwellDivergenceLoss,
-    MetamaterialConstitutiveLoss,
-    InterfaceBoundaryLoss,
+    PowerFlowLoss,
+    RadiationLoss,
     SPPBoundaryLoss,
     TangentialContinuityLoss,
-    PowerFlowLoss,
-    EM_CompositeLoss,
     WaveguideLoss,
-    RadiationLoss
+)
+from .pinn_network import (
+    ComplexPINN,
+    ElectromagneticPINN,
+    FourierEMFeatures,
+    MultiFrequencyPINN,
+    NondimensionalPINN,
+    SPPNetwork,
 )
 
 __all__ = [
-    'ElectromagneticPINN',
-    'ComplexPINN', 
-    'SPPNetwork',
-    'MetamaterialDeepONet',
-    'MultiFrequencyPINN',
-    'MaxwellCurlLoss',
-    'MaxwellDivergenceLoss',
-    'MetamaterialConstitutiveLoss',
-    'InterfaceBoundaryLoss',
-    'SPPBoundaryLoss',
-    'TangentialContinuityLoss',
-    'PowerFlowLoss',
-    'EM_CompositeLoss',
-    'WaveguideLoss',
-    'RadiationLoss'
+    "ElectromagneticPINN",
+    "ComplexPINN",
+    "NondimensionalPINN",
+    "SPPNetwork",
+    "MultiFrequencyPINN",
+    "FourierEMFeatures",
+    "split_complex",
+    "to_complex",
+    "join_complex",
+    "BaseLoss",
+    "MaxwellCurlLoss",
+    "MaxwellDivergenceLoss",
+    "InterfaceBoundaryLoss",
+    "SPPBoundaryLoss",
+    "TangentialContinuityLoss",
+    "PowerFlowLoss",
+    "EM_CompositeLoss",
+    "WaveguideLoss",
+    "RadiationLoss",
 ]
 
-__version__ = '0.1.0'
+__version__ = "0.1.0"
